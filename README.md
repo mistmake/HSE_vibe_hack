@@ -11,6 +11,7 @@
 - API-эндпоинт: `/api/profile`
 - API-эндпоинт с формулой оценивания: `/api/subjects/formula`
 - API-эндпоинт с количеством предметов по направлению из wiki: `/api/curriculum/subjects-count`
+- отдельный скрипт поиска ведомостей по группе: `gradebook_finder.py`
 
 ## Как установить
 
@@ -38,3 +39,19 @@ uvicorn app:app --reload
 - формула оценивания: `http://127.0.0.1:8000/api/subjects/formula?subject=calculus-1&module=2`
 - предметы по направлению: `http://127.0.0.1:8000/api/curriculum/subjects-count?direction=DSBA&academic_year=2025/2026&module=3`
 - swagger-документация FastAPI: `http://127.0.0.1:8000/docs`
+
+## Скрипт ведомостей
+
+Поиск ссылок на ведомости по программе и группе:
+
+```powershell
+python3 gradebook_finder.py --program PAD --group "БПАД 257-1" --no-gpt
+```
+
+Если хочешь подключить GPT API для более умного выбора ссылки на сложных страницах:
+
+```powershell
+set OPENAI_API_KEY=your_key
+set OPENAI_MODEL=gpt-4.1-mini
+python3 gradebook_finder.py --program PAD --group "БПАД 257-1"
+```
