@@ -13,6 +13,7 @@
 - API-эндпоинт с количеством предметов по направлению из wiki: `/api/curriculum/subjects-count`
 - API-эндпоинт с ведомостью по предмету и группе: `/api/gradebooks/subject`
 - отдельный скрипт поиска ведомостей по группе: `gradebook_finder.py`
+- отдельный скрипт поиска формулы предмета через wiki + GPT: `formula_finder.py`
 
 ## Как установить
 
@@ -56,10 +57,19 @@ python3 gradebook_finder.py --program PAD --group "БПАД 257-1" --no-gpt
 python3 gradebook_finder.py --program PAD --all-groups --no-gpt
 ```
 
+## Скрипт формул
+
+Поиск формулы оценивания для конкретного предмета:
+
+```powershell
+python3 formula_finder.py --program PAD --subject "Calculus 1" --module "3 модуль" --no-gpt
+```
+
 Если хочешь подключить GPT API для более умного выбора ссылки на сложных страницах:
 
 ```powershell
 set OPENAI_API_KEY=your_key
 set OPENAI_MODEL=gpt-4.1-mini
 python3 gradebook_finder.py --program PAD --group "БПАД 257-1"
+python3 formula_finder.py --program PAD --subject "Calculus 1" --module "3 модуль"
 ```

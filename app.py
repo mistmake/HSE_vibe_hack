@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+from formula_finder import find_subject_formula
 from gradebook_finder import DEFAULT_ACADEMIC_YEAR, find_subject_gradebook
 
 
@@ -274,121 +275,9 @@ FALLBACK_SUBJECTS = {
     },
 }
 
-FORMULA_PRESETS = [
-    "0.4 × контрольные + 0.3 × домашние задания + 0.3 × экзамен",
-    "0.5 × накопленная оценка + 0.5 × экзамен",
-    "0.35 × практические задания + 0.25 × квизы + 0.4 × экзамен",
-    "0.3 × лабораторные работы + 0.3 × проект + 0.4 × экзамен",
-    "0.4 × семинары + 0.2 × самостоятельная работа + 0.4 × экзамен",
-    "0.6 × накопленная оценка + 0.4 × экзамен",
-]
-
-
-def normalize_text(value: str) -> str:
-    return value.lower().replace("ё", "е")
-
-
 def build_formula_info(name: str, index: int, module_value: str) -> dict:
-    lower_name = normalize_text(name)
-    module_number = parse_module_number(module_value)
-    late_module = module_number >= 3
-
-    exact_rules = [
-        {
-            "patterns": ("введение в программную инженерию",),
-            "formula": "0.4 * Домашнее задание (ДЗ1) + 0.2 * Домашнее задание (ДЗ2) + 0.4 * Экзамен (Экз)",
-            "source_url": "https://www.hse.ru/edu/courses/1048869220",
-        },
-        {
-            "patterns": ("алгебра",),
-            "formula": (
-                "О2 = 0,5·Онакопл + 0,2·Оауд.раб. + 0,3·Оэкз, где Онакопл = 0,35·Ок/р2 + 0,25·Од/з3 + 0,4·Од/з4 + Экз.раб.-1"
-                if late_module
-                else "О1 = 0,4·Онакопл + 0,4·Окр1 + 0,2·Оэкз, где Онакопл = 0,35·Ок/р1 + 0,25·Од/з1 + 0,4·Од/з2"
-            ),
-            "source_url": "https://www.hse.ru/edu/courses/992431400",
-        },
-        {
-            "patterns": ("математический анализ",),
-            "formula": (
-                "О2 = 0,7·Онакопл + 0,3·Оэкз, где Онакопл = 0,4·Ок/р1 + 0,6·Ок/р2"
-                if late_module
-                else "О1 = 0,7·Онакопл + 0,3·Оэкз, где Онакопл = 0,6·Одз + 0,4·Ок/р"
-            ),
-            "source_url": "https://www.hse.ru/edu/courses/499689014",
-        },
-        {
-            "patterns": ("дискретная математика",),
-            "formula": (
-                "Оценка в промежуточном контроле за четвертый модуль = 0.2* оценка за самостоятельную работу + 0.3* оценка за контрольную работу + 0.5* оценка за экзамен"
-                if late_module
-                else "Оценка в промежуточном контроле за второй модуль = 0.3* оценка за самостоятельную работу + 0.3* оценка за контрольную работу + 0.4* оценка за экзамен"
-            ),
-            "source_url": "https://www.hse.ru/edu/courses/920918968",
-        },
-        {
-            "patterns": ("история россии", "russian history"),
-            "formula": "0,4* работа на семинарских занятиях + 0,6*письменный экзамен",
-            "source_url": "https://www.hse.ru/edu/courses/981310937",
-        },
-        {
-            "patterns": ("линейная алгебра и геометрия", "linear algebra"),
-            "formula": "F = 0,2·Q1 + 0,2·Q2 + 0,2·Q3 + 0,4·Exam, где Q1-Q3 - оценки за контрольные мероприятия, а Exam - оценка за экзамен",
-            "source_url": "https://www.hse.ru/edu/courses/923275839",
-        },
-        {
-            "patterns": ("архитектура компьютера и операционные системы",),
-            "formula": "0.05 * Активность на семинарах + 0.05 * Активность на семинарах + 0.3 * Домашнее задание + 0.3 * Домашнее задание + 0.1 * Контрольная работа + 0.1 * Контрольная работа + 0.1 * Экзамен",
-            "source_url": "https://www.hse.ru/edu/courses/1048863976",
-        },
-        {
-            "patterns": ("алгоритмы и структуры данных", "algorithms and data structures"),
-            "formula": "0.3 * Экзамен + 0.4 * Большие домашние задания + 0.2 * Маленькие домашние задания + 0.1 * Контрольная работа",
-            "source_url": "https://www.hse.ru/edu/courses/1048856505",
-        },
-        {
-            "patterns": ("основы программирования на c++", "язык программирования c++"),
-            "formula": "Мин(Округление(0.6 * Большие_дз + 0.4 * Маленькие_дз + Б), 10), где Б — бонус",
-            "source_url": "https://www.hse.ru/edu/courses/1014898936",
-        },
-        {
-            "patterns": ("python programming language (advanced course)",),
-            "formula": "0.4*task1 + 0.4*task2 + 0.2*classwork",
-            "source_url": "https://www.hse.ru/edu/courses/759625360",
-        },
-        {
-            "patterns": ("machine learning 1",),
-            "formula": "0.1 * hw + 0.4 * contest + 0.5 * exam",
-            "source_url": "https://www.hse.ru/edu/courses/758248162",
-        },
-        {
-            "patterns": ("mathematical statistics",),
-            "formula": "Midterm Assessment = 0.2 * Homework + 0.4 * Test + 0.4 * Exam",
-            "source_url": "https://www.hse.ru/edu/courses/759794992",
-        },
-        {
-            "patterns": ("теория вероятностей", "probability theory"),
-            "formula": (
-                "The course grade for the 4th module is 0.6 * FinalExam + 0.2 * SpringMock (April Midterm) + 0.2 * spring Home assignments."
-                if late_module
-                else "The course grade for the 1st module is 0.7 * FallMock (October Midterm) + 0.3 * fall Home assignments."
-            ),
-            "source_url": "https://www.hse.ru/edu/courses/758318906",
-        },
-    ]
-
-    for rule in exact_rules:
-        if any(pattern in lower_name for pattern in rule["patterns"]):
-            return {
-                "formula": rule["formula"],
-                "source_url": rule["source_url"],
-                "source_label": "Официальная страница курса ВШЭ",
-                "is_exact": True,
-            }
-
-    fallback_formula = FORMULA_PRESETS[index % len(FORMULA_PRESETS)]
     return {
-        "formula": fallback_formula,
+        "formula": "Формула будет загружена с wiki ФКН для выбранного предмета",
         "source_url": "",
         "source_label": "",
         "is_exact": False,
@@ -544,6 +433,29 @@ def get_selected_subject(subject: str | None, subjects: list[dict]):
     return selected_index, subjects[selected_index]
 
 
+def enrich_subject_formula(subject_data: dict, direction_code: str, module_value: str) -> dict:
+    enriched = dict(subject_data)
+
+    try:
+        formula_result = find_subject_formula(
+            subject_name=subject_data["name"],
+            program_code=direction_code,
+            module_value=module_value,
+            use_gpt=True,
+        )
+    except Exception:
+        formula_result = None
+
+    if not formula_result:
+        return enriched
+
+    enriched["formula"] = formula_result["formula"]
+    enriched["formula_source_url"] = formula_result["page_url"]
+    enriched["formula_source_label"] = formula_result["source_label"]
+    enriched["formula_is_exact"] = formula_result["is_exact"]
+    return enriched
+
+
 def build_program_payload() -> list[dict]:
     return [{"code": program["code"], "name": program["name"]} for program in PROGRAMS]
 
@@ -596,6 +508,42 @@ async def subjects_api(
     return build_subject_payload(direction_code, course, current_module)
 
 
+@app.get("/api/subjects/formula")
+async def subject_formula_api(
+    request: Request,
+    subject: str = Query(..., description="Название предмета, например 'Calculus 1'"),
+    direction: str | None = Query(None, description="Код программы, например PAD / PI / PMI"),
+    current_module: str | None = Query(None, description="Текущий модуль, например '3 модуль'"),
+    use_gpt: bool = Query(True, description="Использовать GPT API для извлечения формулы"),
+):
+    direction_code = (direction or request.session.get("direction", "PI")).strip().upper()
+    module_value = (current_module or request.session.get("current_module", "1 модуль")).strip()
+
+    try:
+        formula_result = find_subject_formula(
+            subject_name=subject.strip(),
+            program_code=direction_code,
+            module_value=module_value,
+            use_gpt=use_gpt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось получить формулу с wiki: {exc}") from exc
+
+    return {
+        "subject": subject.strip(),
+        "direction_code": direction_code,
+        "current_module": module_value,
+        "formula": formula_result["formula"],
+        "formula_lines": formula_result["formula_lines"],
+        "formula_source_url": formula_result["page_url"],
+        "formula_source_label": formula_result["source_label"],
+        "formula_is_exact": formula_result["is_exact"],
+        "used_gpt": formula_result["used_gpt"],
+    }
+
+
 @app.post("/")
 async def submit_form(
     request: Request,
@@ -623,6 +571,7 @@ async def success(request: Request, subject: str | None = None):
     subject_payload = build_subject_payload(direction_code, course_value, module_value)
     subjects = subject_payload["subjects"]
     selected_index, selected_subject = get_selected_subject(subject, subjects)
+    selected_subject = enrich_subject_formula(selected_subject, direction_code, module_value)
 
     return templates.TemplateResponse(
         request,
@@ -633,6 +582,7 @@ async def success(request: Request, subject: str | None = None):
             "course": course_value,
             "current_module": module_value,
             "direction": request.session.get("direction_name", direction_code),
+            "direction_code": direction_code,
             "automats": subject_payload["automats"],
             "subjects": subjects,
             "selected_subject": selected_subject,
@@ -652,6 +602,7 @@ async def profile_api(request: Request, subject: str | None = None):
     subject_payload = build_subject_payload(direction_code, course_value, module_value)
     subjects = subject_payload["subjects"]
     selected_index, selected_subject = get_selected_subject(subject, subjects)
+    selected_subject = enrich_subject_formula(selected_subject, direction_code, module_value)
 
     return {
         "full_name": request.session.get("full_name", "Имя Фамилия"),

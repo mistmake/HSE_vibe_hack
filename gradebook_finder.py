@@ -11,11 +11,11 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 
+from openai_json_client import call_openai_json, has_openai_api_key
 
 WIKI_BASE_URL = "http://wiki.cs.hse.ru"
 WIKI_HUB_TITLE = "Wiki ФКН"
 DEFAULT_ACADEMIC_YEAR = "2025/2026"
-OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 
 PROGRAM_SECTION_IDS = {
     "PMI": "AMI",
@@ -234,11 +234,9 @@ def call_openai_for_gradebook(
     raw_text: str,
     group_code: str,
 ) -> dict | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if not has_openai_api_key():
         return None
 
-    model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     prompt = {
         "subject_name": subject_name,
         "subject_page_title": subject_page_title,
@@ -258,37 +256,11 @@ def call_openai_for_gradebook(
         },
     }
 
-    payload = {
-        "model": model,
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {
-                "role": "system",
-                "content": "You extract gradebook links from HSE FKN wiki pages. Respond with JSON only.",
-            },
-            {
-                "role": "user",
-                "content": json.dumps(prompt, ensure_ascii=False),
-            },
-        ],
-    }
-
-    request = urllib.request.Request(
-        OPENAI_API_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            data = json.load(response)
-        content = data["choices"][0]["message"]["content"]
-        return json.loads(content)
+        return call_openai_json(
+            system_prompt="You extract gradebook links from HSE FKN wiki pages. Respond with JSON only.",
+            user_payload=prompt,
+        )
     except Exception:
         return None
 
@@ -422,7 +394,7 @@ def find_group_gradebooks(
             )
         )
 
-    if use_gpt and os.getenv("OPENAI_API_KEY"):
+    if use_gpt and has_openai_api_key():
         seen_subjects = {match.subject_page_title for match in matches if match.match_type == "group_specific"}
         for subject_payload in collected["subject_payloads"]:
             page_title = subject_payload["subject_page_title"]
@@ -461,7 +433,7 @@ def find_group_gradebooks(
         "program_code": resolved_program,
         "group": group_code,
         "academic_year": academic_year,
-        "used_gpt": bool(use_gpt and os.getenv("OPENAI_API_KEY")),
+        "used_gpt": bool(use_gpt and has_openai_api_key()),
         "matches": [asdict(match) for match in matches],
     }
 
