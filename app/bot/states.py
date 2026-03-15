@@ -4,6 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 class BotStates(StatesGroup):
     onboarding_full_name = State()
     onboarding_group = State()
+    onboarding_program = State()
     profile_edit_full_name = State()
     profile_edit_group = State()
     waiting_source_url = State()

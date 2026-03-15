@@ -8,7 +8,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot.callbacks import ClarificationCallback, SourceActionCallback
-from app.bot.formatters import format_clarification, format_source_summary, format_subject_details
+from app.bot.formatters import (
+    format_clarification,
+    format_source_summary,
+    format_subject_details,
+    format_summary,
+    format_sync_report,
+)
 from app.bot.keyboards import clarification_keyboard, source_actions_keyboard
 from app.bot.services.contracts import StudyBotService
 from app.bot.services.session_service import SessionService
@@ -18,16 +24,49 @@ from app.bot.states import BotStates
 def build_sources_router(service: StudyBotService, sessions: SessionService) -> Router:
     router = Router()
 
+    async def run_profile_sync(message: Message) -> None:
+        await message.answer("Ищу ведомости по профилю и запускаю анализ.")
+        try:
+            sources = await asyncio.to_thread(service.sync_and_analyze_profile, message.from_user.id)
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+        for source in sources:
+            sessions.set_last_source(message.from_user.id, source.id)
+        await message.answer(format_sync_report(sources))
+        await message.answer(format_summary(sources))
+        next_source = next(
+            (
+                source
+                for source in sources
+                if source.status == "needs_clarification" and source.clarification is not None
+            ),
+            None,
+        )
+        if next_source is not None and next_source.clarification is not None:
+            await message.answer(
+                format_clarification(next_source.clarification),
+                reply_markup=clarification_keyboard(next_source.id, next_source.clarification),
+            )
+
     @router.message(Command("add_source"))
     async def add_source_command(message: Message, state: FSMContext) -> None:
         await state.set_state(BotStates.waiting_source_url)
-        await message.answer("Пришли публичную ссылку на Google Sheets.")
+        await message.answer("Пришли публичную ссылку на Google Sheets. Это резервный ручной режим.")
+
+    @router.message(Command("sync"))
+    async def sync_command(message: Message) -> None:
+        await run_profile_sync(message)
+
+    @router.message(F.text == "Обновить ведомости")
+    async def sync_menu(message: Message) -> None:
+        await run_profile_sync(message)
 
     @router.message(Command("sources"))
     async def list_sources(message: Message) -> None:
         sources = service.list_sources(message.from_user.id)
         if not sources:
-            await message.answer("Пока нет сохраненных источников. Добавь первый через /add_source.")
+            await message.answer("Пока нет сохраненных источников. Запусти /sync, и я найду их по профилю.")
             return
         for source in sources:
             await message.answer(
@@ -81,5 +120,18 @@ def build_sources_router(service: StudyBotService, sessions: SessionService) -> 
             callback_data.action,
         )
         await callback.message.answer(format_subject_details(source))
+        next_source = next(
+            (
+                item
+                for item in service.list_sources(callback.from_user.id)
+                if item.id != source.id and item.status == "needs_clarification" and item.clarification is not None
+            ),
+            None,
+        )
+        if next_source is not None and next_source.clarification is not None:
+            await callback.message.answer(
+                format_clarification(next_source.clarification),
+                reply_markup=clarification_keyboard(next_source.id, next_source.clarification),
+            )
 
     return router

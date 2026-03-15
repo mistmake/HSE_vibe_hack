@@ -9,6 +9,7 @@ class BotProfile:
     telegram_id: int
     full_name: str
     group_name: str
+    program_code: str | None
     created_at: str
     updated_at: str
 

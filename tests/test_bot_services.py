@@ -111,6 +111,16 @@ class LocalStudyBotServiceTestCase(unittest.TestCase):
             profiles=ProfileRepository(storage),
             sources=SourceRepository(storage),
             analysis_runner=lambda source, full_name, group_name: build_fake_result(),
+            gradebook_resolver=lambda group_name, program_code: {
+                "matches": [
+                    {
+                        "subject_name": "Алгоритмы",
+                        "google_sheet_url": "https://docs.google.com/spreadsheets/d/demo/edit#gid=0",
+                        "match_type": "group_specific",
+                        "source": "wiki_regex",
+                    }
+                ]
+            },
             enable_llm_structure=False,
         )
 
@@ -118,14 +128,15 @@ class LocalStudyBotServiceTestCase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_register_profile_and_add_source(self) -> None:
-        profile = self.service.register_profile(1, "Иванов Иван Иванович", "БПМИ231")
+        profile = self.service.register_profile(1, "Иванов Иван Иванович", "БПМИ231", "PMI")
         source = self.service.add_source(1, "https://docs.google.com/spreadsheets/d/demo/edit#gid=0")
 
         self.assertEqual(profile.full_name, "Иванов Иван Иванович")
+        self.assertEqual(profile.program_code, "PMI")
         self.assertEqual(source.status, "created")
 
     def test_run_analysis_stores_completed_result(self) -> None:
-        self.service.register_profile(1, "Иванов Иван Иванович", "БПМИ231")
+        self.service.register_profile(1, "Иванов Иван Иванович", "БПМИ231", "PMI")
         source = self.service.add_source(1, "https://docs.google.com/spreadsheets/d/demo/edit#gid=0")
 
         analyzed = self.service.run_analysis(1, source.id)
@@ -140,9 +151,10 @@ class LocalStudyBotServiceTestCase(unittest.TestCase):
             profiles=ProfileRepository(storage),
             sources=SourceRepository(storage),
             analysis_runner=lambda source, full_name, group_name: build_fake_result(matched_confidence=0.5),
+            gradebook_resolver=lambda group_name, program_code: {"matches": []},
             enable_llm_structure=False,
         )
-        service.register_profile(2, "Иванов Иван Иванович", "БПМИ231")
+        service.register_profile(2, "Иванов Иван Иванович", "БПМИ231", "PMI")
         source = service.add_source(2, "https://docs.google.com/spreadsheets/d/demo/edit#gid=0")
 
         analyzed = service.run_analysis(2, source.id)
@@ -151,7 +163,7 @@ class LocalStudyBotServiceTestCase(unittest.TestCase):
         self.assertEqual(analyzed.clarification.kind, "student_match")  # type: ignore[union-attr]
 
     def test_formatters_render_source_result(self) -> None:
-        self.service.register_profile(1, "Иванов Иван Иванович", "БПМИ231")
+        self.service.register_profile(1, "Иванов Иван Иванович", "БПМИ231", "PMI")
         source = self.service.add_source(1, "https://docs.google.com/spreadsheets/d/demo/edit#gid=0")
         analyzed = self.service.run_analysis(1, source.id)
 
@@ -161,3 +173,21 @@ class LocalStudyBotServiceTestCase(unittest.TestCase):
         self.assertIn("Сводка по учебе", summary)
         self.assertIn("Алгоритмы", details)
         self.assertIn("Компоненты", details)
+
+    def test_sync_profile_sources_uses_gradebook_resolver(self) -> None:
+        self.service.register_profile(1, "Иванов Иван Иванович", "257-1", "PAD")
+
+        sources = self.service.sync_profile_sources(1)
+
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].subject_name, "Алгоритмы")
+        self.assertEqual(sources[0].status, "created")
+
+    def test_sync_and_analyze_profile_runs_analysis_for_resolved_sources(self) -> None:
+        self.service.register_profile(1, "Иванов Иван Иванович", "257-1", "PAD")
+
+        analyzed_sources = self.service.sync_and_analyze_profile(1)
+
+        self.assertEqual(len(analyzed_sources), 1)
+        self.assertEqual(analyzed_sources[0].status, "completed")
+        self.assertIsNotNone(analyzed_sources[0].analysis_result)

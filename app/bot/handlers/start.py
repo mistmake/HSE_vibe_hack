@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
-from app.bot.formatters import format_profile
-from app.bot.keyboards import main_menu_keyboard
+from app.bot.callbacks import ProgramCallback
+from app.bot.formatters import format_clarification, format_profile, format_summary, format_sync_report
+from app.bot.keyboards import clarification_keyboard, main_menu_keyboard, program_keyboard
 from app.bot.services.contracts import StudyBotService
 from app.bot.services.session_service import SessionService
 from app.bot.states import BotStates
@@ -20,9 +23,10 @@ def build_start_router(service: StudyBotService, sessions: SessionService) -> Ro
         telegram_id = message.from_user.id
         profile = service.get_profile(telegram_id)
         if profile is None:
-            await state.set_state(BotStates.onboarding_full_name)
+            await state.set_state(BotStates.onboarding_program)
             await message.answer(
-                "Я помогу собрать учебную сводку по твоим таблицам. Для начала пришли ФИО."
+                "Я помогу собрать учебную сводку по ведомостям. Для начала выбери программу.",
+                reply_markup=program_keyboard(),
             )
             return
         await state.clear()
@@ -31,27 +35,67 @@ def build_start_router(service: StudyBotService, sessions: SessionService) -> Ro
             reply_markup=main_menu_keyboard(),
         )
 
-    @router.message(BotStates.onboarding_full_name, F.text)
-    async def onboarding_full_name(message: Message, state: FSMContext) -> None:
-        await state.update_data(full_name=message.text.strip())
+    @router.callback_query(BotStates.onboarding_program, ProgramCallback.filter())
+    async def onboarding_program(
+        callback: CallbackQuery,
+        callback_data: ProgramCallback,
+        state: FSMContext,
+    ) -> None:
+        await callback.answer("Сохраняю профиль...")
+        await state.update_data(program_code=callback_data.code)
         await state.set_state(BotStates.onboarding_group)
-        await message.answer("Теперь пришли группу, например `БПМИ231`.", parse_mode="Markdown")
+        await callback.message.answer(
+            "Теперь пришли группу, например `БПАД 257-1` или `257-1`.",
+            parse_mode="Markdown",
+        )
 
     @router.message(BotStates.onboarding_group, F.text)
     async def onboarding_group(message: Message, state: FSMContext) -> None:
+        await state.update_data(group_name=message.text.strip())
+        await state.set_state(BotStates.onboarding_full_name)
+        await message.answer("Теперь пришли ФИО полностью.")
+
+    @router.message(BotStates.onboarding_full_name, F.text)
+    async def onboarding_full_name(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         profile = service.register_profile(
             telegram_id=message.from_user.id,
-            full_name=data["full_name"],
-            group_name=message.text.strip(),
+            full_name=message.text.strip(),
+            group_name=data["group_name"],
+            program_code=data["program_code"],
         )
         sessions.get(message.from_user.id)
         await state.clear()
         await message.answer(
-            "Профиль сохранен. Теперь пришли публичную ссылку на Google Sheets с ведомостью.",
+            "Профиль сохранен. Ищу ведомости по группе и программе, это может занять немного времени.",
             reply_markup=main_menu_keyboard(),
         )
         await message.answer(format_profile(profile))
+        try:
+            sources = await asyncio.to_thread(
+                service.sync_and_analyze_profile,
+                message.from_user.id,
+            )
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+        await message.answer(format_sync_report(sources))
+        await message.answer(format_summary(sources))
+        for source in sources:
+            sessions.set_last_source(message.from_user.id, source.id)
+        next_source = next(
+            (
+                source
+                for source in sources
+                if source.status == "needs_clarification" and source.clarification is not None
+            ),
+            None,
+        )
+        if next_source is not None and next_source.clarification is not None:
+            await message.answer(
+                format_clarification(next_source.clarification),
+                reply_markup=clarification_keyboard(next_source.id, next_source.clarification),
+            )
 
     @router.message(F.text == "Сводка")
     async def menu_summary(message: Message) -> None:
@@ -64,11 +108,6 @@ def build_start_router(service: StudyBotService, sessions: SessionService) -> Ro
             await message.answer("Профиль пока пустой. Нажми /start, и мы его соберем.")
             return
         await message.answer(format_profile(profile))
-
-    @router.message(F.text == "Добавить источник")
-    async def menu_add_source(message: Message, state: FSMContext) -> None:
-        await state.set_state(BotStates.waiting_source_url)
-        await message.answer("Пришли публичную ссылку на Google Sheets.")
 
     @router.message(F.text == "Источники")
     async def menu_sources(message: Message) -> None:

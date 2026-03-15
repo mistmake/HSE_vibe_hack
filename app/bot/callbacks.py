@@ -13,3 +13,7 @@ class SubjectCallback(CallbackData, prefix="subject"):
 class ClarificationCallback(CallbackData, prefix="clarify"):
     action: str
     source_id: int
+
+
+class ProgramCallback(CallbackData, prefix="program"):
+    code: str

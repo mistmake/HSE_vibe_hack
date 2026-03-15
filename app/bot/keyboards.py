@@ -3,14 +3,14 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.bot.callbacks import ClarificationCallback, SourceActionCallback, SubjectCallback
+from app.bot.callbacks import ClarificationCallback, ProgramCallback, SourceActionCallback, SubjectCallback
 from app.bot.domain import ClarificationRequest, StoredSource
 
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Добавить источник"), KeyboardButton(text="Сводка")],
+            [KeyboardButton(text="Обновить ведомости"), KeyboardButton(text="Сводка")],
             [KeyboardButton(text="Дедлайны"), KeyboardButton(text="Советы")],
             [KeyboardButton(text="Профиль"), KeyboardButton(text="Источники")],
         ],
@@ -53,4 +53,22 @@ def clarification_keyboard(source_id: int, request: ClarificationRequest) -> Inl
             callback_data=ClarificationCallback(action="skip", source_id=source_id).pack(),
         )
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def program_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for code, label in (
+        ("PMI", "ПМИ"),
+        ("PI", "ПИ"),
+        ("PAD", "ПАД"),
+        ("KNAD", "КНАД"),
+        ("EAD", "ЭАД"),
+        ("DRIP", "ДРИП"),
+    ):
+        builder.button(
+            text=label,
+            callback_data=ProgramCallback(code=code).pack(),
+        )
+    builder.adjust(2)
     return builder.as_markup()

@@ -32,6 +32,7 @@ class SQLiteStorage:
                     telegram_id INTEGER PRIMARY KEY,
                     full_name TEXT NOT NULL,
                     group_name TEXT NOT NULL,
+                    program_code TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -57,6 +58,7 @@ class SQLiteStorage:
                 )
                 """
             )
+            _ensure_column(connection, "profiles", "program_code", "TEXT")
 
 
 class ProfileRepository:
@@ -75,25 +77,34 @@ class ProfileRepository:
             telegram_id=row["telegram_id"],
             full_name=row["full_name"],
             group_name=row["group_name"],
+            program_code=row["program_code"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
 
-    def upsert(self, telegram_id: int, full_name: str, group_name: str) -> BotProfile:
+    def upsert(
+        self,
+        telegram_id: int,
+        full_name: str,
+        group_name: str,
+        program_code: str | None = None,
+    ) -> BotProfile:
         existing = self.get(telegram_id)
         now = utc_now_iso()
         created_at = existing.created_at if existing else now
+        resolved_program_code = program_code if program_code is not None else (existing.program_code if existing else None)
         with self.storage._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO profiles (telegram_id, full_name, group_name, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO profiles (telegram_id, full_name, group_name, program_code, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(telegram_id) DO UPDATE SET
                     full_name = excluded.full_name,
                     group_name = excluded.group_name,
+                    program_code = excluded.program_code,
                     updated_at = excluded.updated_at
                 """,
-                (telegram_id, full_name, group_name, created_at, now),
+                (telegram_id, full_name, group_name, resolved_program_code, created_at, now),
             )
         return self.get(telegram_id)  # type: ignore[return-value]
 
@@ -102,7 +113,14 @@ class SourceRepository:
     def __init__(self, storage: SQLiteStorage) -> None:
         self.storage = storage
 
-    def save_new(self, telegram_id: int, source_url: str, source_type: str) -> StoredSource:
+    def save_new(
+        self,
+        telegram_id: int,
+        source_url: str,
+        source_type: str,
+        subject_name: str | None = None,
+        progress_message: str | None = None,
+    ) -> StoredSource:
         now = utc_now_iso()
         with self.storage._connect() as connection:
             connection.execute(
@@ -112,14 +130,24 @@ class SourceRepository:
                     overall_confidence, progress_message, last_error,
                     analysis_result_json, clarification_json, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, ?, ?)
                 ON CONFLICT(telegram_id, source_url) DO UPDATE SET
                     source_type = excluded.source_type,
+                    subject_name = COALESCE(excluded.subject_name, sources.subject_name),
                     status = excluded.status,
                     progress_message = excluded.progress_message,
                     updated_at = excluded.updated_at
                 """,
-                (telegram_id, source_url, source_type, "created", "Источник сохранен.", now, now),
+                (
+                    telegram_id,
+                    source_url,
+                    source_type,
+                    "created",
+                    subject_name,
+                    progress_message or "Источник сохранен.",
+                    now,
+                    now,
+                ),
             )
             row = connection.execute(
                 "SELECT id FROM sources WHERE telegram_id = ? AND source_url = ?",
@@ -204,3 +232,12 @@ def _row_to_source(row: sqlite3.Row | None) -> StoredSource | None:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
+
+
+def _ensure_column(connection: sqlite3.Connection, table_name: str, column_name: str, column_type: str) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")

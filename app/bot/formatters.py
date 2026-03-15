@@ -4,11 +4,14 @@ from app.bot.domain import BotProfile, ClarificationRequest, StoredSource
 
 
 def format_profile(profile: BotProfile) -> str:
-    return (
-        "Твой профиль:\n"
-        f"- ФИО: {profile.full_name}\n"
-        f"- Группа: {profile.group_name}"
-    )
+    lines = [
+        "Твой профиль:",
+        f"- ФИО: {profile.full_name}",
+        f"- Группа: {profile.group_name}",
+    ]
+    if profile.program_code:
+        lines.append(f"- Программа: {translate_program(profile.program_code)}")
+    return "\n".join(lines)
 
 
 def format_source_summary(source: StoredSource) -> str:
@@ -144,6 +147,21 @@ def format_clarification(request: ClarificationRequest) -> str:
     return "\n".join(lines)
 
 
+def format_sync_report(sources: list[StoredSource]) -> str:
+    completed = sum(1 for source in sources if source.status == "completed")
+    needs_clarification = sum(1 for source in sources if source.status == "needs_clarification")
+    failed = sum(1 for source in sources if source.status == "failed")
+    created = sum(1 for source in sources if source.status == "created")
+    return (
+        "Обновление ведомостей завершено:\n"
+        f"- найдено источников: {len(sources)}\n"
+        f"- завершено анализов: {completed}\n"
+        f"- требуют подтверждения: {needs_clarification}\n"
+        f"- с ошибкой: {failed}\n"
+        f"- ждут запуска: {created}"
+    )
+
+
 def translate_risk(risk_level: str) -> str:
     mapping = {
         "high": "высокий",
@@ -160,3 +178,15 @@ def translate_urgency(urgency: str) -> str:
         "low": "низкий приоритет",
     }
     return mapping.get(urgency, urgency)
+
+
+def translate_program(program_code: str) -> str:
+    mapping = {
+        "PMI": "ПМИ",
+        "PI": "ПИ",
+        "PAD": "ПАД",
+        "KNAD": "КНАД",
+        "EAD": "ЭАД",
+        "DRIP": "ДРИП",
+    }
+    return mapping.get(program_code, program_code)
