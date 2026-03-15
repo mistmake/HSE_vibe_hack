@@ -1,12 +1,10 @@
-import json
+import html
 import re
 import time
-import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 
-from fastapi import FastAPI, Form, HTTPException, Query, Request
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -18,381 +16,546 @@ app.add_middleware(SessionMiddleware, secret_key="hackathon-demo-secret")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-WIKI_BASE_URL = "http://wiki.cs.hse.ru"
-DEFAULT_ACADEMIC_YEAR = "2025/2026"
+
 PROGRAMS = [
-    {"code": "PMI", "name": "Прикладная математика и информатика"},
-    {"code": "PI", "name": "Программная инженерия"},
-    {"code": "PAD", "name": "Прикладной анализ данных"},
-    {"code": "KNAD", "name": "Компьютерные науки и анализ данных"},
-    {"code": "RGDP", "name": "Разработка игр и цифровых продуктов"},
-    {"code": "EAD", "name": "Экономика и анализ данных"},
-    {"code": "DRIP", "name": "Дизайн и разработка информационных продуктов"},
-    {"code": "PIRS", "name": "Проектирование интеллектуальных робототехнических систем"},
-    {"code": "PMIDD", "name": "Программа двух дипломов НИУ ВШЭ и ЦУ «Прикладная математика и информатика»"},
+    {
+        "code": "PI",
+        "name": "Программная инженерия",
+        "tutors_url": "https://www.hse.ru/ba/se/tutors",
+    },
+    {
+        "code": "PMI",
+        "name": "Прикладная математика и информатика",
+        "tutors_url": "https://www.hse.ru/ba/ami/tutors",
+    },
+    {
+        "code": "PAD",
+        "name": "Прикладной анализ данных",
+        "tutors_url": "https://www.hse.ru/ba/data/tutors",
+    },
+    {
+        "code": "KNAD",
+        "name": "Компьютерные науки и анализ данных",
+        "tutors_url": "https://www.hse.ru/ba/compds/tutors",
+    },
+    {
+        "code": "DRIP",
+        "name": "Дизайн и разработка информационных продуктов",
+        "tutors_url": "https://www.hse.ru/ba/drip/tutors",
+    },
 ]
-PROGRAM_NAME_BY_CODE = {program["code"]: program["name"] for program in PROGRAMS}
-WIKI_DIRECTION_ALIASES = {
-    "аналитика": "DSBA",
-    "business analytics": "DSBA",
-    "data science and business analytics": "DSBA",
-    "dsba": "DSBA",
-    "pmi": "PMI",
-    "прикладная математика и информатика": "PMI",
-    "pi": "PI",
-    "программная инженерия": "PI",
-    "pad": "PAD",
-    "прикладной анализ данных": "PAD",
-    "knad": "KNAD",
-    "компьютерные науки и анализ данных": "KNAD",
-    "rgdp": "RGDP",
-    "разработка игр и цифровых продуктов": "RGDP",
-    "ead": "EAD",
-    "экономика и анализ данных": "EAD",
-    "drip": "DRIP",
-    "дизайн и разработка информационных продуктов": "DRIP",
-    "pirs": "PIRS",
-    "проектирование интеллектуальных робототехнических систем": "PIRS",
-    "pmidd": "PMIDD",
-}
 
+PROGRAM_BY_CODE = {program["code"]: program for program in PROGRAMS}
 COURSES = ["1 курс", "2 курс", "3 курс", "4 курс"]
-
 MODULES = ["1 модуль", "2 модуль", "3 модуль", "4 модуль"]
 
-AUTOMATS = [
-    "Высшая математика",
-    "Алгоритмы и структуры данных",
-    "Академическое письмо",
-    "Английский язык",
+FALLBACK_SUBJECTS = {
+    "PI": {
+        "1 курс": {
+            "1 модуль": [
+                "Алгебра",
+                "Математический анализ",
+                "Введение в программную инженерию",
+                "История России",
+            ],
+            "2 модуль": [
+                "Алгебра",
+                "Математический анализ",
+                "Введение в программную инженерию",
+                "Алгоритмы и алгоритмические языки",
+            ],
+            "3 модуль": [
+                "Основы программирования на C++",
+                "Дискретная математика",
+                "Линейная алгебра и геометрия",
+                "Английский язык",
+            ],
+            "4 модуль": [
+                "Основы программирования на C++",
+                "English Language Integrative Exam",
+                "Линейная алгебра и геометрия",
+                "Математический анализ",
+            ],
+        },
+        "2 курс": {
+            "1 модуль": [
+                "Алгоритмы и структуры данных",
+                "Архитектура компьютера и операционные системы",
+                "Теория вероятностей",
+                "Научно-исследовательский семинар \"Основы веб-разработки на PHP\"",
+            ],
+            "2 модуль": [
+                "Алгоритмы и структуры данных",
+                "Архитектура компьютера и операционные системы",
+                "Теория вероятностей",
+                "Научно-исследовательский семинар \"Основы веб-разработки на PHP\"",
+            ],
+            "3 модуль": [
+                "Алгоритмы и структуры данных",
+                "Архитектура компьютера и операционные системы",
+                "Научно-исследовательский семинар \"Основы веб-разработки на PHP\"",
+                "Независимый экзамен по программированию. Продвинутый уровень",
+            ],
+            "4 модуль": [
+                "Алгоритмы и структуры данных",
+                "Архитектура компьютера и операционные системы",
+                "Независимый экзамен по программированию. Продвинутый уровень",
+                "English Language Integrative Exam",
+            ],
+        },
+    },
+    "PMI": {
+        "1 курс": {
+            "1 модуль": [
+                "Линейная алгебра и геометрия",
+                "Математический анализ",
+                "История России",
+                "Английский язык",
+            ],
+            "2 модуль": [
+                "Линейная алгебра и геометрия",
+                "Математический анализ",
+                "История России",
+                "Английский язык",
+            ],
+            "3 модуль": [
+                "Математический анализ",
+                "Дискретная математика (углубленный курс)",
+                "Английский язык",
+                "Основы российской государственности",
+            ],
+            "4 модуль": [
+                "Алгебра",
+                "Алгебра (углубленный курс)",
+                "Линейная алгебра и геометрия",
+                "Английский язык",
+            ],
+        }
+    },
+    "PAD": {
+        "1 курс": {
+            "1 модуль": [
+                "English Language",
+                "Russian History",
+                "Physical Training",
+                "Основы российской государственности",
+            ],
+            "2 модуль": [
+                "English Language",
+                "Russian History",
+                "Physical Training",
+                "Основы российской государственности",
+            ],
+            "3 модуль": [
+                "English Language",
+                "Russian History",
+                "Physical Training",
+                "Основы российской государственности",
+            ],
+            "4 модуль": [
+                "English Language",
+                "English Language Integrative Exam",
+                "Russian History",
+                "Physical Training",
+            ],
+        },
+        "2 курс": {
+            "1 модуль": [
+                "Discrete Mathematics 2",
+                "Теория вероятностей",
+                "Python Programming Language (advanced course)",
+                "Physical Training",
+            ],
+            "2 модуль": [
+                "Discrete Mathematics 2",
+                "Теория вероятностей",
+                "Python Programming Language (advanced course)",
+                "Physical Training",
+            ],
+            "3 модуль": [
+                "Machine Learning 1",
+                "Mathematical Statistics",
+                "Physical Training",
+                "Machine Learning 1",
+            ],
+            "4 модуль": [
+                "Machine Learning 1",
+                "Mathematical Statistics",
+                "Physical Training",
+                "English Language Integrative Exam",
+            ],
+        },
+    },
+    "KNAD": {
+        "1 курс": {
+            "1 модуль": [
+                "Algebra",
+                "Linear Algebra",
+                "Математический анализ",
+                "Russian History",
+            ],
+            "2 модуль": [
+                "Algorithms and Data Structures",
+                "Algebra",
+                "Linear Algebra",
+                "Математический анализ",
+            ],
+            "3 модуль": [
+                "Python as a Tool for Data Collection and Analysis",
+                "Discrete Mathematics",
+                "Modern Software Engineering Practices",
+                "Программирование на языке С++",
+            ],
+            "4 модуль": [
+                "Algorithms and Data Structures",
+                "Discrete Mathematics",
+                "English Language Integrative Exam",
+                "Modern Software Engineering Practices",
+            ],
+        },
+        "2 курс": {
+            "1 модуль": [
+                "Алгебра",
+                "Physical Training",
+                "Теория вероятностей",
+                "Machine Learning 1",
+            ],
+            "2 модуль": [
+                "Алгебра",
+                "Physical Training",
+                "Теория вероятностей",
+                "Machine Learning 1",
+            ],
+            "3 модуль": [
+                "Machine Learning 1",
+                "Архитектура компьютера и операционные системы",
+                "Physical Training",
+                "Advanced Statistics 2",
+            ],
+            "4 модуль": [
+                "Machine Learning 1",
+                "Архитектура компьютера и операционные системы",
+                "Physical Training",
+                "English Language Integrative Exam",
+            ],
+        },
+    },
+    "DRIP": {
+        "1 курс": {
+            "1 модуль": [
+                "Язык программирования C++",
+                "Дискретная математика",
+                "Математический анализ",
+                "История России",
+            ],
+            "2 модуль": [
+                "Язык программирования C++",
+                "Дискретная математика",
+                "Математический анализ",
+                "История России",
+            ],
+            "3 модуль": [
+                "Язык программирования Java",
+                "Алгоритмы и структуры данных 1",
+                "Проектная работа",
+                "Английский язык",
+            ],
+            "4 модуль": [
+                "Язык программирования Java",
+                "Алгоритмы и структуры данных 1",
+                "Проектная работа",
+                "English Language Integrative Exam",
+            ],
+        }
+    },
+}
+
+FORMULA_PRESETS = [
+    "0.4 × контрольные + 0.3 × домашние задания + 0.3 × экзамен",
+    "0.5 × накопленная оценка + 0.5 × экзамен",
+    "0.35 × практические задания + 0.25 × квизы + 0.4 × экзамен",
+    "0.3 × лабораторные работы + 0.3 × проект + 0.4 × экзамен",
+    "0.4 × семинары + 0.2 × самостоятельная работа + 0.4 × экзамен",
+    "0.6 × накопленная оценка + 0.4 × экзамен",
 ]
 
-SUBJECTS = [
-    {
-        "slug": "programming",
-        "name": "Программирование",
-        "aliases": ["programming"],
-        "local_rank": "56/220",
-        "score": "4.5",
-        "direction": "PI",
-        "course": 1,
-        "grading_text": """
-        CUM1 = 0.4*Lab1 + 0.3*Lab2 + 0.3*Quiz1
-        G1 = 0.6*CUM1 + 0.4*Exam1
-        """,
-    },
-    {
-        "slug": "calculus-1",
-        "name": "Математический анализ",
-        "aliases": ["calculus 1", "calculous 1", "math analysis", "математический анализ"],
-        "local_rank": "41/220",
-        "score": "5.2",
-        "direction": "DSBA",
-        "course": 1,
-        "grading_text": """
-        CUM2 = 0.15*CW3 + 0.25*Mid2 + 0.15*CW4 + 0.25*Colloq2 + 0.2*Q2 (no rounding)
-        G2 = 0.7*CUM2 + 0.3*Exam2 + Bonus2 (no rounding)
 
-        Mid2 - Written control work (midterm) at the end of the 3rd
-        module (or at the beginning of the 4th module)
-        Exam2 - Written exam at the end of the 4th module
-        Bonus2 - Number of bonus points for bonus tasks
-        """,
-    },
-    {
-        "slug": "discrete-math",
-        "name": "Дискретная математика",
-        "aliases": ["discrete math", "дискретная математика"],
-        "local_rank": "63/220",
-        "score": "4.8",
-        "direction": "PMI",
-        "course": 1,
-        "grading_text": """
-        CUM1 = 0.25*HW1 + 0.25*HW2 + 0.5*Test1
-        G1 = 0.7*CUM1 + 0.3*Exam1
-        """,
-    },
-    {
-        "slug": "english",
-        "name": "Английский язык",
-        "aliases": ["english", "английский язык"],
-        "local_rank": "34/220",
-        "score": "5.4",
-        "direction": "PI",
-        "course": 1,
-        "grading_text": """
-        CUM1 = 0.5*Speaking + 0.3*Writing + 0.2*Quiz
-        G1 = 0.8*CUM1 + 0.2*Exam1
-        """,
-    },
-]
+def normalize_text(value: str) -> str:
+    return value.lower().replace("ё", "е")
 
 
-def get_selected_subject(subject: str | None):
+def build_formula_info(name: str, index: int, module_value: str) -> dict:
+    lower_name = normalize_text(name)
+    module_number = parse_module_number(module_value)
+    late_module = module_number >= 3
+
+    exact_rules = [
+        {
+            "patterns": ("введение в программную инженерию",),
+            "formula": "0.4 * Домашнее задание (ДЗ1) + 0.2 * Домашнее задание (ДЗ2) + 0.4 * Экзамен (Экз)",
+            "source_url": "https://www.hse.ru/edu/courses/1048869220",
+        },
+        {
+            "patterns": ("алгебра",),
+            "formula": (
+                "О2 = 0,5·Онакопл + 0,2·Оауд.раб. + 0,3·Оэкз, где Онакопл = 0,35·Ок/р2 + 0,25·Од/з3 + 0,4·Од/з4 + Экз.раб.-1"
+                if late_module
+                else "О1 = 0,4·Онакопл + 0,4·Окр1 + 0,2·Оэкз, где Онакопл = 0,35·Ок/р1 + 0,25·Од/з1 + 0,4·Од/з2"
+            ),
+            "source_url": "https://www.hse.ru/edu/courses/992431400",
+        },
+        {
+            "patterns": ("математический анализ",),
+            "formula": (
+                "О2 = 0,7·Онакопл + 0,3·Оэкз, где Онакопл = 0,4·Ок/р1 + 0,6·Ок/р2"
+                if late_module
+                else "О1 = 0,7·Онакопл + 0,3·Оэкз, где Онакопл = 0,6·Одз + 0,4·Ок/р"
+            ),
+            "source_url": "https://www.hse.ru/edu/courses/499689014",
+        },
+        {
+            "patterns": ("дискретная математика",),
+            "formula": (
+                "Оценка в промежуточном контроле за четвертый модуль = 0.2* оценка за самостоятельную работу + 0.3* оценка за контрольную работу + 0.5* оценка за экзамен"
+                if late_module
+                else "Оценка в промежуточном контроле за второй модуль = 0.3* оценка за самостоятельную работу + 0.3* оценка за контрольную работу + 0.4* оценка за экзамен"
+            ),
+            "source_url": "https://www.hse.ru/edu/courses/920918968",
+        },
+        {
+            "patterns": ("история россии", "russian history"),
+            "formula": "0,4* работа на семинарских занятиях + 0,6*письменный экзамен",
+            "source_url": "https://www.hse.ru/edu/courses/981310937",
+        },
+        {
+            "patterns": ("линейная алгебра и геометрия", "linear algebra"),
+            "formula": "F = 0,2·Q1 + 0,2·Q2 + 0,2·Q3 + 0,4·Exam, где Q1-Q3 - оценки за контрольные мероприятия, а Exam - оценка за экзамен",
+            "source_url": "https://www.hse.ru/edu/courses/923275839",
+        },
+        {
+            "patterns": ("архитектура компьютера и операционные системы",),
+            "formula": "0.05 * Активность на семинарах + 0.05 * Активность на семинарах + 0.3 * Домашнее задание + 0.3 * Домашнее задание + 0.1 * Контрольная работа + 0.1 * Контрольная работа + 0.1 * Экзамен",
+            "source_url": "https://www.hse.ru/edu/courses/1048863976",
+        },
+        {
+            "patterns": ("алгоритмы и структуры данных", "algorithms and data structures"),
+            "formula": "0.3 * Экзамен + 0.4 * Большие домашние задания + 0.2 * Маленькие домашние задания + 0.1 * Контрольная работа",
+            "source_url": "https://www.hse.ru/edu/courses/1048856505",
+        },
+        {
+            "patterns": ("основы программирования на c++", "язык программирования c++"),
+            "formula": "Мин(Округление(0.6 * Большие_дз + 0.4 * Маленькие_дз + Б), 10), где Б — бонус",
+            "source_url": "https://www.hse.ru/edu/courses/1014898936",
+        },
+        {
+            "patterns": ("python programming language (advanced course)",),
+            "formula": "0.4*task1 + 0.4*task2 + 0.2*classwork",
+            "source_url": "https://www.hse.ru/edu/courses/759625360",
+        },
+        {
+            "patterns": ("machine learning 1",),
+            "formula": "0.1 * hw + 0.4 * contest + 0.5 * exam",
+            "source_url": "https://www.hse.ru/edu/courses/758248162",
+        },
+        {
+            "patterns": ("mathematical statistics",),
+            "formula": "Midterm Assessment = 0.2 * Homework + 0.4 * Test + 0.4 * Exam",
+            "source_url": "https://www.hse.ru/edu/courses/759794992",
+        },
+        {
+            "patterns": ("теория вероятностей", "probability theory"),
+            "formula": (
+                "The course grade for the 4th module is 0.6 * FinalExam + 0.2 * SpringMock (April Midterm) + 0.2 * spring Home assignments."
+                if late_module
+                else "The course grade for the 1st module is 0.7 * FallMock (October Midterm) + 0.3 * fall Home assignments."
+            ),
+            "source_url": "https://www.hse.ru/edu/courses/758318906",
+        },
+    ]
+
+    for rule in exact_rules:
+        if any(pattern in lower_name for pattern in rule["patterns"]):
+            return {
+                "formula": rule["formula"],
+                "source_url": rule["source_url"],
+                "source_label": "Официальная страница курса ВШЭ",
+                "is_exact": True,
+            }
+
+    fallback_formula = FORMULA_PRESETS[index % len(FORMULA_PRESETS)]
+    return {
+        "formula": fallback_formula,
+        "source_url": "",
+        "source_label": "",
+        "is_exact": False,
+    }
+
+
+def make_subject(name: str, index: int, module_value: str) -> dict:
+    scores = ["4.5", "5.2", "4.8", "5.4", "4.9", "5.1"]
+    ranks = ["56/220", "41/220", "63/220", "34/220", "52/220", "48/220"]
+    formula_info = build_formula_info(name, index, module_value)
+    return {
+        "name": name,
+        "local_rank": ranks[index % len(ranks)],
+        "score": scores[index % len(scores)],
+        "formula": formula_info["formula"],
+        "formula_source_url": formula_info["source_url"],
+        "formula_source_label": formula_info["source_label"],
+        "formula_is_exact": formula_info["is_exact"],
+    }
+
+
+def parse_course_number(value: str) -> int:
+    match = re.search(r"\d+", value)
+    return int(match.group()) if match else 1
+
+
+def parse_module_number(value: str) -> int:
+    match = re.search(r"\d+", value)
+    return int(match.group()) if match else 1
+
+
+def parse_module_list(raw_modules: str) -> list[int]:
+    numbers = [int(item) for item in re.findall(r"\d+", raw_modules)]
+    if not numbers:
+        return []
+    if len(numbers) == 2 and "-" in raw_modules:
+        start, end = numbers
+        if start <= end:
+            return list(range(start, end + 1))
+    return sorted(set(numbers))
+
+
+def html_to_text(raw_html: str) -> str:
+    cleaned = re.sub(r"(?is)<script.*?>.*?</script>", " ", raw_html)
+    cleaned = re.sub(r"(?is)<style.*?>.*?</style>", " ", cleaned)
+    cleaned = re.sub(r"(?s)<[^>]+>", "\n", cleaned)
+    cleaned = html.unescape(cleaned)
+    cleaned = cleaned.replace("\xa0", " ")
+    return cleaned
+
+
+def parse_courses_from_text(text: str, course_number: int, module_number: int) -> list[str]:
+    subjects = []
+    seen = set()
+    patterns = [
+        re.compile(
+            r"(?P<title>[^\n()]{3,}?)\s*\((?P<course>\d)[-–]?(?:й)?\s*курс,\s*(?P<modules>[^)]*?модул[^)]*)\)",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?P<title>[^\n()]{3,}?)\s*\((?P<course>\d)\s*year,\s*(?P<modules>[^)]*?module[^)]*)\)",
+            flags=re.IGNORECASE,
+        ),
+    ]
+
+    for pattern in patterns:
+        for match in pattern.finditer(text):
+            title = re.sub(r"\s+", " ", match.group("title")).strip(" -\n\t")
+            parsed_course = int(match.group("course"))
+            modules = parse_module_list(match.group("modules"))
+
+            if parsed_course != course_number or module_number not in modules:
+                continue
+
+            if len(title) < 3 or len(title) > 120:
+                continue
+
+            if title.lower() in seen:
+                continue
+
+            seen.add(title.lower())
+            subjects.append(title)
+
+    return subjects
+
+
+@lru_cache(maxsize=32)
+def fetch_page(url: str) -> str:
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    }
+    request = urllib.request.Request(url, headers=headers)
+
+    last_error = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return response.read().decode("utf-8", errors="ignore")
+        except Exception as exc:
+            last_error = exc
+            time.sleep(0.35 * (attempt + 1))
+
+    raise last_error
+
+
+def load_real_subjects(program_code: str, course_value: str, module_value: str) -> list[dict]:
+    program = PROGRAM_BY_CODE.get(program_code)
+    if not program:
+        return [make_subject(name, index, "1 модуль") for index, name in enumerate(FALLBACK_SUBJECTS["PI"]["1 курс"]["1 модуль"])]
+
+    course_number = parse_course_number(course_value)
+    module_number = parse_module_number(module_value)
+
+    try:
+        raw_page = fetch_page(program["tutors_url"])
+        text = html_to_text(raw_page)
+        names = parse_courses_from_text(text, course_number, module_number)
+    except Exception:
+        names = []
+
+    if not names:
+        fallback_names = (
+            FALLBACK_SUBJECTS.get(program_code, {})
+            .get(course_value, {})
+            .get(module_value, [])
+        )
+        names = fallback_names
+
+    if not names:
+        names = ["Предметы по выбранной комбинации пока не найдены"]
+
+    unique_names = []
+    seen = set()
+    for name in names:
+        key = name.lower()
+        if key not in seen:
+            seen.add(key)
+            unique_names.append(name)
+
+    return [make_subject(name, index, module_value) for index, name in enumerate(unique_names[:8])]
+
+
+def get_selected_subject(subject: str | None, subjects: list[dict]):
     try:
         selected_index = int(subject or "1") - 1
     except ValueError:
         selected_index = 0
 
-    if selected_index < 0 or selected_index >= len(SUBJECTS):
+    if selected_index < 0 or selected_index >= len(subjects):
         selected_index = 0
 
-    return selected_index, SUBJECTS[selected_index]
+    return selected_index, subjects[selected_index]
 
 
-def normalize_subject_key(value: str) -> str:
-    return re.sub(r"[^a-zA-Zа-яА-Я0-9]+", "-", value.strip().lower()).strip("-")
+def build_program_payload() -> list[dict]:
+    return [{"code": program["code"], "name": program["name"]} for program in PROGRAMS]
 
 
-def find_subject_by_name(subject: str):
-    lookup = normalize_subject_key(subject)
-
-    for item in SUBJECTS:
-        candidates = [item["slug"], item["name"], *item.get("aliases", [])]
-        normalized_candidates = {normalize_subject_key(candidate) for candidate in candidates}
-
-        if lookup in normalized_candidates:
-            return item
-
-    return None
-
-
-def extract_formula_lines(grading_text: str, module: int) -> list[str]:
-    formulas = []
-
-    for raw_line in grading_text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        compact_line = re.sub(r"\s+", "", line).upper()
-        if compact_line.startswith((f"CUM{module}=", f"CUM_{module}=", f"G{module}=", f"G_{module}=")):
-            formulas.append(line)
-
-    return formulas
-
-
-def normalize_direction_key(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip().lower())
-
-
-def resolve_wiki_direction(direction: str | None) -> str:
-    if not direction:
-        raise HTTPException(status_code=400, detail="Не передано направление")
-
-    direction_key = normalize_direction_key(direction)
-    if direction_key in WIKI_DIRECTION_ALIASES:
-        return WIKI_DIRECTION_ALIASES[direction_key]
-
-    raw_value = direction.strip().upper()
-    if re.fullmatch(r"[A-Z]{2,10}", raw_value):
-        return raw_value
-
-    raise HTTPException(status_code=400, detail="Для направления пока нет сопоставления с wiki")
-
-
-def get_program_name(program_code: str | None) -> str:
-    if not program_code:
-        return ""
-
-    return PROGRAM_NAME_BY_CODE.get(program_code, program_code)
-
-
-def wiki_api_url(params: dict[str, str]) -> str:
-    return f"{WIKI_BASE_URL}/api.php?{urllib.parse.urlencode(params)}"
-
-
-@lru_cache(maxsize=64)
-def fetch_json(url: str) -> dict:
-    last_error = None
-    for attempt in range(3):
-        try:
-            with urllib.request.urlopen(url, timeout=20) as response:
-                return json.load(response)
-        except Exception as exc:
-            last_error = exc
-            time.sleep(0.25 * (attempt + 1))
-
-    raise last_error
-
-
-@lru_cache(maxsize=256)
-def fetch_wiki_raw(title: str) -> str:
-    raw_url = f"{WIKI_BASE_URL}/index.php?{urllib.parse.urlencode({'title': title, 'action': 'raw'})}"
-    for attempt in range(3):
-        try:
-            with urllib.request.urlopen(raw_url, timeout=20) as response:
-                return response.read().decode("utf-8", errors="ignore")
-        except Exception:
-            time.sleep(0.25 * (attempt + 1))
-
-    return ""
-
-
-@lru_cache(maxsize=32)
-def fetch_direction_titles(wiki_direction: str, academic_year: str) -> list[str]:
-    params = {
-        "action": "query",
-        "list": "allpages",
-        "aplimit": "500",
-        "format": "json",
-    }
-    apfrom = None
-    matched_titles = []
-    needle = f" {wiki_direction} {academic_year}"
-
-    for _ in range(100):
-        current_params = params.copy()
-        if apfrom:
-            current_params["apfrom"] = apfrom
-
-        data = fetch_json(wiki_api_url(current_params))
-        pages = data.get("query", {}).get("allpages", [])
-        matched_titles.extend(
-            page["title"] for page in pages if needle in page.get("title", "")
-        )
-
-        apfrom = data.get("query-continue", {}).get("allpages", {}).get("apfrom")
-        if not apfrom:
-            break
-
-    return matched_titles
-
-
-def extract_modules_from_title(title: str) -> list[int]:
-    match = re.search(r"modules\s+([1-4])\s*-\s*([1-4])$", title, flags=re.IGNORECASE)
-    if not match:
-        return []
-
-    start_module = int(match.group(1))
-    end_module = int(match.group(2))
-    if start_module > end_module:
-        start_module, end_module = end_module, start_module
-
-    return list(range(start_module, end_module + 1))
-
-
-def extract_modules_from_raw(raw_text: str) -> list[int]:
-    semester_1_patterns = (
-        r"CUM\s*<sub>\s*1\s*</sub>",
-        r"G\s*<sub>\s*1\s*</sub>",
-        r"Final\s*<sub>\s*1\s*</sub>",
-        r"Exam\s*<sub>\s*1\s*</sub>",
-        r"CUM1\b",
-        r"G1\b",
-        r"Exam1\b",
-    )
-    semester_2_patterns = (
-        r"CUM\s*<sub>\s*2\s*</sub>",
-        r"G\s*<sub>\s*2\s*</sub>",
-        r"Final\s*<sub>\s*2\s*</sub>",
-        r"Exam\s*<sub>\s*2\s*</sub>",
-        r"CUM2\b",
-        r"G2\b",
-        r"Exam2\b",
-        r"CW\s*<sub>\s*3\s*</sub>",
-        r"CW\s*<sub>\s*4\s*</sub>",
-    )
-
-    modules = set()
-    if any(re.search(pattern, raw_text, flags=re.IGNORECASE) for pattern in semester_1_patterns):
-        modules.update({1, 2})
-    if any(re.search(pattern, raw_text, flags=re.IGNORECASE) for pattern in semester_2_patterns):
-        modules.update({3, 4})
-
-    for module in re.findall(r"\bM([1-4])\b", raw_text, flags=re.IGNORECASE):
-        modules.add(int(module))
-
-    for module in re.findall(r"\b(?:module|mod)\s*([1-4])\b", raw_text, flags=re.IGNORECASE):
-        modules.add(int(module))
-
-    for module in re.findall(r"\b([1-4])(?:st|nd|rd|th)\s+module\b", raw_text, flags=re.IGNORECASE):
-        modules.add(int(module))
-
-    if re.search(r"\b(?:1st|first)\s+semester\b", raw_text, flags=re.IGNORECASE):
-        modules.update({1, 2})
-    if re.search(r"\b(?:2nd|second)\s+semester\b", raw_text, flags=re.IGNORECASE):
-        modules.update({3, 4})
-
-    return sorted(modules)
-
-
-def build_subject_entry(title: str, wiki_direction: str, academic_year: str) -> dict:
-    base_title = re.sub(rf"\s+{re.escape(wiki_direction)}\s+{re.escape(academic_year)}.*$", "", title).strip()
-    modules = extract_modules_from_title(title)
-    if not modules:
-        modules = extract_modules_from_raw(fetch_wiki_raw(title))
-
+def build_subject_payload(direction_code: str, course_value: str, module_value: str) -> dict:
+    subjects = load_real_subjects(direction_code, course_value, module_value)
+    selected_index, selected_subject = get_selected_subject(None, subjects)
     return {
-        "base_title": base_title,
-        "page_title": title,
-        "modules": modules,
-    }
-
-
-@lru_cache(maxsize=16)
-def build_direction_summary(wiki_direction: str, academic_year: str) -> dict:
-    titles = fetch_direction_titles(wiki_direction, academic_year)
-    if not titles:
-        return {
-            "academic_year": academic_year,
-            "subjects_total": 0,
-            "module_counts": {str(module): 0 for module in range(1, 5)},
-            "semester_counts": {"1": 0, "2": 0, "full_year": 0, "unknown": 0},
-            "subjects": [],
-        }
-
-    subject_entries = []
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        future_map = {
-            pool.submit(build_subject_entry, title, wiki_direction, academic_year): title for title in titles
-        }
-        for future in as_completed(future_map):
-            subject_entries.append(future.result())
-
-    grouped_subjects = {}
-    for entry in subject_entries:
-        base_title = entry["base_title"]
-        grouped_subjects.setdefault(
-            base_title,
-            {"name": base_title, "pages": [], "modules": set()},
-        )
-        grouped_subjects[base_title]["pages"].append(entry["page_title"])
-        grouped_subjects[base_title]["modules"].update(entry["modules"])
-
-    module_counts = {str(module): 0 for module in range(1, 5)}
-    semester_counts = {"1": 0, "2": 0, "full_year": 0, "unknown": 0}
-    subjects = []
-
-    for base_title in sorted(grouped_subjects):
-        subject = grouped_subjects[base_title]
-        modules = sorted(subject["modules"])
-        for module in modules:
-            module_counts[str(module)] += 1
-
-        if modules == [1, 2, 3, 4]:
-            semester_counts["full_year"] += 1
-        elif modules and set(modules).issubset({1, 2}):
-            semester_counts["1"] += 1
-        elif modules and set(modules).issubset({3, 4}):
-            semester_counts["2"] += 1
-        else:
-            semester_counts["unknown"] += 1
-
-        subjects.append(
-            {
-                "name": subject["name"],
-                "modules": modules,
-                "pages": sorted(subject["pages"]),
-            }
-        )
-
-    return {
-        "academic_year": academic_year,
-        "subjects_total": len(subjects),
-        "module_counts": module_counts,
-        "semester_counts": semester_counts,
+        "direction_code": direction_code,
+        "direction_name": PROGRAM_BY_CODE.get(direction_code, {}).get("name", direction_code),
+        "course": course_value,
+        "current_module": module_value,
+        "automats": [item["name"] for item in subjects[:4]],
         "subjects": subjects,
+        "selected_index": selected_index,
+        "selected_subject": selected_subject,
     }
 
 
@@ -414,6 +577,21 @@ async def index(request: Request):
     )
 
 
+@app.get("/api/programs")
+async def programs_api():
+    return {"programs": build_program_payload()}
+
+
+@app.get("/api/subjects")
+async def subjects_api(
+    direction: str = "PI",
+    course: str = "1 курс",
+    current_module: str = "1 модуль",
+):
+    direction_code = direction.strip().upper()
+    return build_subject_payload(direction_code, course, current_module)
+
+
 @app.post("/")
 async def submit_form(
     request: Request,
@@ -427,7 +605,7 @@ async def submit_form(
     request.session["full_name"] = full_name.strip()
     request.session["group_number"] = group_number.strip()
     request.session["direction"] = direction_code
-    request.session["direction_name"] = get_program_name(direction_code)
+    request.session["direction_name"] = PROGRAM_BY_CODE.get(direction_code, {}).get("name", direction_code)
     request.session["course"] = course.strip()
     request.session["current_module"] = current_module.strip()
     return RedirectResponse(url="/success", status_code=303)
@@ -435,15 +613,24 @@ async def submit_form(
 
 @app.get("/success")
 async def success(request: Request, subject: str | None = None):
-    selected_index, selected_subject = get_selected_subject(subject)
+    direction_code = request.session.get("direction", "PI")
+    course_value = request.session.get("course", "1 курс")
+    module_value = request.session.get("current_module", "1 модуль")
+    subject_payload = build_subject_payload(direction_code, course_value, module_value)
+    subjects = subject_payload["subjects"]
+    selected_index, selected_subject = get_selected_subject(subject, subjects)
 
     return templates.TemplateResponse(
         request,
         "success.html",
         {
             "full_name": request.session.get("full_name", "Имя Фамилия"),
-            "automats": AUTOMATS,
-            "subjects": SUBJECTS,
+            "group_number": request.session.get("group_number", ""),
+            "course": course_value,
+            "current_module": module_value,
+            "direction": request.session.get("direction_name", direction_code),
+            "automats": subject_payload["automats"],
+            "subjects": subjects,
             "selected_subject": selected_subject,
             "selected_index": selected_index,
             "preliminary_rank": "12",
@@ -454,76 +641,24 @@ async def success(request: Request, subject: str | None = None):
 
 @app.get("/api/profile")
 async def profile_api(request: Request, subject: str | None = None):
-    selected_index, selected_subject = get_selected_subject(subject)
+    direction_code = request.session.get("direction", "PI")
+    course_value = request.session.get("course", "1 курс")
+    module_value = request.session.get("current_module", "1 модуль")
+    subject_payload = build_subject_payload(direction_code, course_value, module_value)
+    subjects = subject_payload["subjects"]
+    selected_index, selected_subject = get_selected_subject(subject, subjects)
 
     return {
         "full_name": request.session.get("full_name", "Имя Фамилия"),
         "group_number": request.session.get("group_number", ""),
-        "direction": request.session.get("direction", ""),
-        "direction_name": request.session.get("direction_name", get_program_name(request.session.get("direction", ""))),
-        "course": request.session.get("course", ""),
-        "current_module": request.session.get("current_module", ""),
+        "direction": request.session.get("direction_name", direction_code),
+        "direction_code": direction_code,
+        "course": course_value,
+        "current_module": module_value,
         "preliminary_rank": "12",
         "average_score": "5.4",
-        "automats": AUTOMATS,
-        "subjects": SUBJECTS,
+        "automats": subject_payload["automats"],
+        "subjects": subjects,
         "selected_index": selected_index,
         "selected_subject": selected_subject,
     }
-
-
-@app.get("/api/subjects/formula")
-async def subject_formula_api(
-    subject: str = Query(..., description="Название или slug предмета"),
-    module: int = Query(..., ge=1, le=4, description="Номер текущего модуля"),
-    direction: str | None = Query(None, description="Направление"),
-    course: int | None = Query(None, ge=1, le=6, description="Курс"),
-):
-    subject_data = find_subject_by_name(subject)
-    if subject_data is None:
-        raise HTTPException(status_code=404, detail="Предмет не найден")
-
-    if direction and subject_data.get("direction") != direction:
-        raise HTTPException(status_code=404, detail="Предмет не найден для выбранного направления")
-
-    if course and subject_data.get("course") != course:
-        raise HTTPException(status_code=404, detail="Предмет не найден для выбранного курса")
-
-    formula_lines = extract_formula_lines(subject_data.get("grading_text", ""), module)
-    if not formula_lines:
-        raise HTTPException(status_code=404, detail="Формула для выбранного модуля не найдена")
-
-    return {
-        "subject": subject_data["name"],
-        "module": module,
-        "formula": "\n".join(formula_lines),
-        "formula_lines": formula_lines,
-    }
-
-
-@app.get("/api/curriculum/subjects-count")
-async def curriculum_subjects_count_api(
-    request: Request,
-    direction: str | None = Query(None, description="Направление из формы или wiki-код вроде DSBA"),
-    academic_year: str = Query(DEFAULT_ACADEMIC_YEAR, description="Учебный год"),
-    module: int | None = Query(None, ge=1, le=4, description="Если нужен счетчик для конкретного модуля"),
-):
-    selected_direction = (direction or request.session.get("direction", "")).strip()
-    wiki_direction = resolve_wiki_direction(selected_direction)
-
-    try:
-        summary = build_direction_summary(wiki_direction, academic_year)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Не удалось получить данные с wiki: {exc}") from exc
-
-    response = {
-        "direction": selected_direction or wiki_direction,
-        "wiki_direction": wiki_direction,
-        **summary,
-    }
-
-    if module is not None:
-        response["subjects_in_module"] = summary["module_counts"][str(module)]
-        response["requested_module"] = module
-
-    return response

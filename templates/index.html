@@ -3,31 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Анкета участника</title>
+    <title>Учебный профиль</title>
     <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}">
 </head>
 <body class="simple-body">
     <main class="landing-shell">
         <section class="landing-hero">
-            <div class="hero-badge">HSE Vibe 2026</div>
-            <h1 class="landing-title">Собери профиль участника в одном чистом интерфейсе</h1>
+            <span class="hero-badge">Профиль студента ФКН</span>
+            <h1 class="landing-title">Собери учебный профиль и сразу посмотри свои предметы</h1>
             <p class="landing-text">
-                Быстрая анкета, понятный сценарий и отдельный экран профиля после сохранения.
-                Без лишних шагов и с нормальной визуальной подачей.
+                Выбери направление, курс и модуль. После сохранения страница покажет набор дисциплин
+                по выбранной программе и соберет учебный экран в одном стиле.
             </p>
 
             <div class="hero-metrics">
                 <article class="metric-card">
-                    <span class="metric-label">Формат</span>
-                    <strong>FastAPI</strong>
+                    <span class="metric-label">Направления</span>
+                    <strong id="program-count">{{ programs|length }}</strong>
                 </article>
                 <article class="metric-card">
-                    <span class="metric-label">Сценарий</span>
-                    <strong>Форма -> профиль</strong>
+                    <span class="metric-label">Подбор предметов</span>
+                    <strong>По программе и модулю</strong>
                 </article>
                 <article class="metric-card">
-                    <span class="metric-label">Стиль</span>
-                    <strong>Чистый dashboard</strong>
+                    <span class="metric-label">Режим</span>
+                    <strong>FastAPI + UI</strong>
                 </article>
             </div>
         </section>
@@ -35,11 +35,13 @@
         <section class="form-stage">
             <div class="form-panel">
                 <div class="panel-topline">
-                    <span class="panel-kicker">Анкета</span>
+                    <span class="panel-kicker">Данные профиля</span>
                     <span class="panel-dot"></span>
                 </div>
-                <h2 class="panel-title-xl">Данные участника</h2>
-                <p class="panel-subtitle">Заполни поля и перейди на отдельную страницу профиля.</p>
+                <h2 class="panel-title-xl">Заполни данные для учебного экрана</h2>
+                <p class="panel-subtitle">
+                    После сохранения откроется отдельная страница с предметами, рейтингом и выбранным треком.
+                </p>
 
                 <form method="post" class="form">
                     <label class="label" for="full_name">ФИО</label>
@@ -68,9 +70,7 @@
                     <select class="input" id="course" name="course" required>
                         <option value="" disabled {% if not course %}selected{% endif %}>Выберите курс</option>
                         {% for item in courses %}
-                            <option value="{{ item }}" {% if course == item %}selected{% endif %}>
-                                {{ item }}
-                            </option>
+                            <option value="{{ item }}" {% if course == item %}selected{% endif %}>{{ item }}</option>
                         {% endfor %}
                     </select>
 
@@ -78,9 +78,7 @@
                     <select class="input" id="current_module" name="current_module" required>
                         <option value="" disabled {% if not current_module %}selected{% endif %}>Выберите модуль</option>
                         {% for item in modules %}
-                            <option value="{{ item }}" {% if current_module == item %}selected{% endif %}>
-                                {{ item }}
-                            </option>
+                            <option value="{{ item }}" {% if current_module == item %}selected{% endif %}>{{ item }}</option>
                         {% endfor %}
                     </select>
 
@@ -89,15 +87,120 @@
                         <option value="" disabled {% if not direction %}selected{% endif %}>Выберите направление</option>
                         {% for item in programs %}
                             <option value="{{ item.code }}" {% if direction == item.code %}selected{% endif %}>
-                                {{ item.code }} — {{ item.name }}
+                                {{ item.name }}
                             </option>
                         {% endfor %}
                     </select>
+
+                    <section class="preview-card" aria-live="polite">
+                        <div class="preview-head">
+                            <span class="panel-kicker">Предпросмотр</span>
+                            <strong class="preview-title">Что покажется после сохранения</strong>
+                        </div>
+                        <div class="preview-meta" id="preview-meta">Выбери направление, курс и модуль.</div>
+                        <div class="preview-chips" id="subjects-preview">
+                            <span class="preview-chip muted-chip">Предметы появятся здесь</span>
+                        </div>
+                    </section>
 
                     <button class="button primary-button wide-button" type="submit">Сохранить профиль</button>
                 </form>
             </div>
         </section>
     </main>
+
+    <script>
+        const directionSelect = document.getElementById("direction");
+        const courseSelect = document.getElementById("course");
+        const moduleSelect = document.getElementById("current_module");
+        const previewMeta = document.getElementById("preview-meta");
+        const previewContainer = document.getElementById("subjects-preview");
+        const programCount = document.getElementById("program-count");
+
+        async function loadPrograms() {
+            try {
+                const response = await fetch("/api/programs");
+                if (!response.ok) {
+                    return;
+                }
+
+                const data = await response.json();
+                const currentValue = directionSelect.value;
+                const placeholder = directionSelect.querySelector("option[value='']");
+                directionSelect.innerHTML = "";
+                if (placeholder) {
+                    placeholder.selected = !currentValue;
+                    directionSelect.appendChild(placeholder);
+                } else {
+                    const option = document.createElement("option");
+                    option.value = "";
+                    option.disabled = true;
+                    option.selected = !currentValue;
+                    option.textContent = "Выберите направление";
+                    directionSelect.appendChild(option);
+                }
+
+                data.programs.forEach((program) => {
+                    const option = document.createElement("option");
+                    option.value = program.code;
+                    option.textContent = program.name;
+                    if (program.code === currentValue) {
+                        option.selected = true;
+                    }
+                    directionSelect.appendChild(option);
+                });
+
+                if (programCount) {
+                    programCount.textContent = data.programs.length;
+                }
+            } catch (error) {
+                console.error("Не удалось загрузить направления", error);
+            }
+        }
+
+        async function loadSubjectsPreview() {
+            if (!directionSelect.value || !courseSelect.value || !moduleSelect.value) {
+                previewMeta.textContent = "Выбери направление, курс и модуль.";
+                previewContainer.innerHTML = '<span class="preview-chip muted-chip">Предметы появятся здесь</span>';
+                return;
+            }
+
+            const params = new URLSearchParams({
+                direction: directionSelect.value,
+                course: courseSelect.value,
+                current_module: moduleSelect.value
+            });
+
+            previewMeta.textContent = "Подбираем реальные предметы по выбранной программе...";
+
+            try {
+                const response = await fetch(`/api/subjects?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error("subject request failed");
+                }
+
+                const data = await response.json();
+                previewMeta.textContent = `${data.direction_name} • ${data.course} • ${data.current_module}`;
+
+                previewContainer.innerHTML = "";
+                data.subjects.slice(0, 5).forEach((subject) => {
+                    const chip = document.createElement("span");
+                    chip.className = "preview-chip";
+                    chip.textContent = subject.name;
+                    previewContainer.appendChild(chip);
+                });
+            } catch (error) {
+                console.error("Не удалось загрузить предметы", error);
+                previewMeta.textContent = "Не получилось загрузить предметы. После сохранения сработает резервный список.";
+                previewContainer.innerHTML = '<span class="preview-chip muted-chip">Сейчас доступен резервный набор дисциплин</span>';
+            }
+        }
+
+        Promise.resolve(loadPrograms()).finally(loadSubjectsPreview);
+
+        [directionSelect, courseSelect, moduleSelect].forEach((element) => {
+            element.addEventListener("change", loadSubjectsPreview);
+        });
+    </script>
 </body>
 </html>

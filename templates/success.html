@@ -11,9 +11,7 @@
         <section class="dashboard-frame">
             <header class="dashboard-header">
                 <div class="brand-block">
-                    <span class="brand-chip">HSE Profile</span>
                     <h1 class="brand-title">{{ full_name }}</h1>
-                    <p class="brand-subtitle">Персональный академический обзор</p>
                 </div>
 
                 <a class="button ghost-button compact-button" href="{{ request.url_for('index') }}">Назад</a>
@@ -21,19 +19,23 @@
 
             <section class="overview-grid">
                 <article class="overview-card">
-                    <span class="overview-label">Предварительный рейтинг</span>
+                    <span class="overview-label">Рейтинг</span>
                     <strong class="overview-value">{{ preliminary_rank }}</strong>
                 </article>
 
                 <article class="overview-card overview-card-wide">
-                    <span class="overview-label">Статус профиля</span>
-                    <div class="status-line">
-                        <strong class="overview-inline-title">Данные собраны</strong>
-                        <span class="status-pill">Актуально</span>
+                    <div class="summary-row summary-row-top">
+                        <span>Курс</span>
+                        <strong>{{ course }}</strong>
                     </div>
-                    <p class="overview-copy">
-                        Профиль уже выглядит как отдельный кабинет: метрики, предметы, автомат и текущие показатели.
-                    </p>
+                    <div class="summary-row">
+                        <span>Модуль</span>
+                        <strong>{{ current_module }}</strong>
+                    </div>
+                    <div class="summary-row">
+                        <span>Направление</span>
+                        <strong>{{ direction }}</strong>
+                    </div>
                 </article>
 
                 <article class="overview-card">
@@ -46,8 +48,8 @@
                 <section class="subjects-card">
                     <div class="section-head">
                         <div>
-                            <p class="section-kicker">Навигация</p>
                             <h2 class="section-title">Предметы</h2>
+                            <p class="section-note">{{ direction }} • {{ course }} • {{ current_module }}</p>
                         </div>
                     </div>
 
@@ -68,10 +70,18 @@
                             <strong class="focus-value">{{ selected_subject.local_rank }}</strong>
                         </div>
 
-                    <div class="focus-center">
-                        <span class="focus-label">Раздел</span>
-                        <h3 class="focus-title">Формула оценивания</h3>
-                    </div>
+                        <div class="focus-center">
+                            <span class="focus-label">Формула оценивания</span>
+                            <h3 class="focus-title">{{ selected_subject.formula }}</h3>
+                            <p class="focus-note">{{ selected_subject.name }}</p>
+                            {% if selected_subject.formula_source_url %}
+                                <a class="formula-link" href="{{ selected_subject.formula_source_url }}" target="_blank" rel="noreferrer">
+                                    {{ selected_subject.formula_source_label }}
+                                </a>
+                            {% elif not selected_subject.formula_is_exact %}
+                                <p class="formula-link formula-link-muted">Точная формула пока не найдена на открытой странице курса.</p>
+                            {% endif %}
+                        </div>
 
                         <div class="focus-stat focus-stat-right">
                             <span class="focus-label">Текущий балл</span>
@@ -83,10 +93,7 @@
                 <aside class="side-stack">
                     <section class="automats-card">
                         <div class="section-head">
-                            <div>
-                                <p class="section-kicker">Учебный трек</p>
-                                <h2 class="section-title">Автоматы</h2>
-                            </div>
+                            <h2 class="section-title">Автоматы</h2>
                         </div>
 
                         <div class="chips-list">
@@ -97,7 +104,6 @@
                     </section>
 
                     <section class="summary-card">
-                        <p class="section-kicker">Сводка</p>
                         <div class="summary-row">
                             <span>Выбранный предмет</span>
                             <strong>{{ selected_subject.name }}</strong>
