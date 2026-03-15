@@ -16,6 +16,8 @@ app.add_middleware(SessionMiddleware, secret_key="hackathon-demo-secret")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+STATEMENT_URL = "https://my.hse.ru/"
+
 
 PROGRAMS = [
     {
@@ -635,6 +637,7 @@ async def success(request: Request, subject: str | None = None):
             "selected_index": selected_index,
             "preliminary_rank": "12",
             "average_score": "5.4",
+            "statement_url": STATEMENT_URL,
         },
     )
 
@@ -661,4 +664,5 @@ async def profile_api(request: Request, subject: str | None = None):
         "subjects": subjects,
         "selected_index": selected_index,
         "selected_subject": selected_subject,
+        "statement_url": STATEMENT_URL,
     }
