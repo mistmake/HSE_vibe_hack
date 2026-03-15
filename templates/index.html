@@ -87,9 +87,9 @@
                     <label class="label" for="direction">Направление</label>
                     <select class="input" id="direction" name="direction" required>
                         <option value="" disabled {% if not direction %}selected{% endif %}>Выберите направление</option>
-                        {% for item in directions %}
-                            <option value="{{ item }}" {% if direction == item %}selected{% endif %}>
-                                {{ item }}
+                        {% for item in programs %}
+                            <option value="{{ item.code }}" {% if direction == item.code %}selected{% endif %}>
+                                {{ item.code }} — {{ item.name }}
                             </option>
                         {% endfor %}
                     </select>

@@ -20,21 +20,41 @@ templates = Jinja2Templates(directory="templates")
 
 WIKI_BASE_URL = "http://wiki.cs.hse.ru"
 DEFAULT_ACADEMIC_YEAR = "2025/2026"
+PROGRAMS = [
+    {"code": "PMI", "name": "Прикладная математика и информатика"},
+    {"code": "PI", "name": "Программная инженерия"},
+    {"code": "PAD", "name": "Прикладной анализ данных"},
+    {"code": "KNAD", "name": "Компьютерные науки и анализ данных"},
+    {"code": "RGDP", "name": "Разработка игр и цифровых продуктов"},
+    {"code": "EAD", "name": "Экономика и анализ данных"},
+    {"code": "DRIP", "name": "Дизайн и разработка информационных продуктов"},
+    {"code": "PIRS", "name": "Проектирование интеллектуальных робототехнических систем"},
+    {"code": "PMIDD", "name": "Программа двух дипломов НИУ ВШЭ и ЦУ «Прикладная математика и информатика»"},
+]
+PROGRAM_NAME_BY_CODE = {program["code"]: program["name"] for program in PROGRAMS}
 WIKI_DIRECTION_ALIASES = {
     "аналитика": "DSBA",
     "business analytics": "DSBA",
     "data science and business analytics": "DSBA",
     "dsba": "DSBA",
+    "pmi": "PMI",
+    "прикладная математика и информатика": "PMI",
+    "pi": "PI",
+    "программная инженерия": "PI",
+    "pad": "PAD",
+    "прикладной анализ данных": "PAD",
+    "knad": "KNAD",
+    "компьютерные науки и анализ данных": "KNAD",
+    "rgdp": "RGDP",
+    "разработка игр и цифровых продуктов": "RGDP",
+    "ead": "EAD",
+    "экономика и анализ данных": "EAD",
+    "drip": "DRIP",
+    "дизайн и разработка информационных продуктов": "DRIP",
+    "pirs": "PIRS",
+    "проектирование интеллектуальных робототехнических систем": "PIRS",
+    "pmidd": "PMIDD",
 }
-
-
-DIRECTIONS = [
-    "Программная инженерия",
-    "Дизайн",
-    "Аналитика",
-    "Маркетинг",
-    "Менеджмент",
-]
 
 COURSES = ["1 курс", "2 курс", "3 курс", "4 курс"]
 
@@ -54,7 +74,7 @@ SUBJECTS = [
         "aliases": ["programming"],
         "local_rank": "56/220",
         "score": "4.5",
-        "direction": "Программная инженерия",
+        "direction": "PI",
         "course": 1,
         "grading_text": """
         CUM1 = 0.4*Lab1 + 0.3*Lab2 + 0.3*Quiz1
@@ -67,7 +87,7 @@ SUBJECTS = [
         "aliases": ["calculus 1", "calculous 1", "math analysis", "математический анализ"],
         "local_rank": "41/220",
         "score": "5.2",
-        "direction": "Программная инженерия",
+        "direction": "DSBA",
         "course": 1,
         "grading_text": """
         CUM2 = 0.15*CW3 + 0.25*Mid2 + 0.15*CW4 + 0.25*Colloq2 + 0.2*Q2 (no rounding)
@@ -85,7 +105,7 @@ SUBJECTS = [
         "aliases": ["discrete math", "дискретная математика"],
         "local_rank": "63/220",
         "score": "4.8",
-        "direction": "Программная инженерия",
+        "direction": "PMI",
         "course": 1,
         "grading_text": """
         CUM1 = 0.25*HW1 + 0.25*HW2 + 0.5*Test1
@@ -98,7 +118,7 @@ SUBJECTS = [
         "aliases": ["english", "английский язык"],
         "local_rank": "34/220",
         "score": "5.4",
-        "direction": "Программная инженерия",
+        "direction": "PI",
         "course": 1,
         "grading_text": """
         CUM1 = 0.5*Speaking + 0.3*Writing + 0.2*Quiz
@@ -169,6 +189,13 @@ def resolve_wiki_direction(direction: str | None) -> str:
         return raw_value
 
     raise HTTPException(status_code=400, detail="Для направления пока нет сопоставления с wiki")
+
+
+def get_program_name(program_code: str | None) -> str:
+    if not program_code:
+        return ""
+
+    return PROGRAM_NAME_BY_CODE.get(program_code, program_code)
 
 
 def wiki_api_url(params: dict[str, str]) -> str:
@@ -380,7 +407,7 @@ async def index(request: Request):
             "direction": "",
             "course": "",
             "current_module": "",
-            "directions": DIRECTIONS,
+            "programs": PROGRAMS,
             "courses": COURSES,
             "modules": MODULES,
         },
@@ -396,9 +423,11 @@ async def submit_form(
     course: str = Form(...),
     current_module: str = Form(...),
 ):
+    direction_code = direction.strip().upper()
     request.session["full_name"] = full_name.strip()
     request.session["group_number"] = group_number.strip()
-    request.session["direction"] = direction.strip()
+    request.session["direction"] = direction_code
+    request.session["direction_name"] = get_program_name(direction_code)
     request.session["course"] = course.strip()
     request.session["current_module"] = current_module.strip()
     return RedirectResponse(url="/success", status_code=303)
@@ -431,6 +460,7 @@ async def profile_api(request: Request, subject: str | None = None):
         "full_name": request.session.get("full_name", "Имя Фамилия"),
         "group_number": request.session.get("group_number", ""),
         "direction": request.session.get("direction", ""),
+        "direction_name": request.session.get("direction_name", get_program_name(request.session.get("direction", ""))),
         "course": request.session.get("course", ""),
         "current_module": request.session.get("current_module", ""),
         "preliminary_rank": "12",
