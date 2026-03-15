@@ -1,26 +1,75 @@
-# HSE_vibe_hack
+# HSE Study Agent
 
-## Standalone analysis module
+AI-агент в Telegram, который помогает студенту собрать учебные данные из разрозненных таблиц, понять текущий статус по предметам и получить персональные рекомендации без ручного разбора ведомостей.
 
-The repository now contains a separate package, `study_analysis`, for worksheet analysis without `FastAPI`.
+## Видео-демонстрация
 
-The current data model is subject-centric:
-- one source document corresponds to one subject;
-- multiple worksheets inside that document are treated as parts of the same subject.
+> Сюда можно вставить ссылку на скринкаст, GIF или запись демо перед финальной сдачей.
 
-It currently supports:
-- local `CSV` and `TSV` files;
-- public `Google Sheets` links via CSV export across all worksheets;
-- direct `CSV` and `TSV` URLs;
-- heuristic student matching by name and group;
-- optional `LLM` fallback for student row matching;
-- automatic `LLM`-assisted worksheet structure analysis for complex headers;
-- score extraction from worksheet columns;
-- validation, normalization, risk scoring, and rule-based recommendations.
+## Что это за проект
 
-## Quick start
+Проблема, которую мы решаем:
+- учебные данные лежат в разных `Google Sheets`, `CSV` и `TSV`;
+- у каждого преподавателя своя структура таблиц;
+- формулы и веса компонентов неочевидны;
+- студенту трудно быстро понять, где риск, что горит и на что влиять в первую очередь.
 
-Run the standalone analyzer:
+Наше решение:
+- студент взаимодействует с ботом в `Telegram`;
+- бот принимает ссылки на ведомости и учебные таблицы;
+- пайплайн извлекает структуру данных даже из нестандартных таблиц;
+- система валидирует и нормализует результат;
+- бот возвращает summary, риски, дедлайны и рекомендации понятным языком.
+
+## Почему решение сильное
+
+- `Telegram-first UX`: не нужен отдельный интерфейс, бот естественно выглядит как учебный ассистент.
+- `Agent-assisted extraction`: мы не обещаем магически понимать любой формат, а используем LLM там, где нужна гибкость, и детерминированную логику там, где нужна надежность.
+- `Explainable pipeline`: после извлечения данные проходят validation и normalization, поэтому рекомендации не строятся на "сыром" ответе модели.
+- `Real student pain`: проект решает понятную и частую проблему студентов ФКН/ВШЭ, а не абстрактный AI use case.
+- `Хорошо работает на демо`: можно показать путь от ссылки на ведомость до персональной рекомендации в одном диалоге с ботом.
+
+## Как выглядит демо-сценарий
+
+1. Пользователь запускает Telegram-бота и указывает имя и группу.
+2. Бот принимает ссылку на `Google Sheets` или файл с оценками.
+3. `study_analysis` извлекает структуру таблицы, находит строку студента и собирает компоненты оценки.
+4. Пайплайн считает текущий статус, прогноз, риски и ближайшие дедлайны.
+5. Бот отдает краткую сводку и подсказывает, на что обратить внимание в первую очередь.
+
+## Текущий MVP
+
+Сейчас в репозитории уже есть:
+- модуль `study_analysis` для анализа ведомостей и учебных таблиц;
+- Telegram-бот в `app/bot`;
+- локальное хранение на `SQLite`;
+- поддержка `CSV`, `TSV` и публичных `Google Sheets`;
+- эвристический поиск студента по имени и группе;
+- optional `LLM` fallback для сложного матчинга и структуры листа;
+- расчет рисков и rule-based рекомендации.
+
+Текущая модель данных subject-centric:
+- один источник данных соответствует одному предмету;
+- несколько worksheet внутри документа считаются частями одного предмета.
+
+## Архитектурная идея
+
+Ключевой принцип проекта: `LLM` не является единственным источником истины.
+
+Пайплайн устроен так:
+- `fetcher` получает данные из источника;
+- `preprocessor` подготавливает таблицу;
+- `extractor` с помощью эвристик и LLM извлекает структуру;
+- `validator` проверяет корректность;
+- `normalizer` приводит результат к общей схеме;
+- rule-based логика считает риски, дедлайны и рекомендации;
+- бот показывает итог пользователю в понятной форме.
+
+Именно это делает проект убедительным: мы используем AI там, где он действительно нужен, но не отдаем ему без проверки финальную арифметику и бизнес-логику.
+
+## Быстрый запуск анализа
+
+Запуск standalone-анализатора:
 
 ```bash
 python3 analyze_sheet.py \
@@ -30,7 +79,7 @@ python3 analyze_sheet.py \
   --view normalized
 ```
 
-You can also pass a link instead of a file path:
+Можно передать ссылку вместо локального файла:
 
 ```bash
 python3 analyze_sheet.py \
@@ -40,30 +89,30 @@ python3 analyze_sheet.py \
   --view normalized
 ```
 
-Available views:
-- `full` - everything, including worksheet-level extraction and validation;
-- `extraction` - raw extraction output per worksheet;
-- `normalized` - normalized student-facing result.
+Доступные представления:
+- `full` - полный результат с extraction и validation;
+- `extraction` - сырой результат извлечения по worksheet;
+- `normalized` - нормализованный student-facing результат.
 
-## Input and output
+## Вход и выход
 
-Input:
-- `--source`: one of:
-  - local path to `.csv` or `.tsv`
-  - public Google Sheets link
-  - direct HTTP(S) link to `.csv` or `.tsv`
-- `--student`: full student name used for row matching
-- `--group`: optional group string used as additional evidence
-- `--llm-student-match openai`: optional fallback if heuristic row matching fails
-- `--llm-worksheet-structure`: `auto` by default; uses LLM to understand complex multi-row headers and component columns
+Вход:
+- `--source`: один из вариантов:
+  - локальный путь к `.csv` или `.tsv`;
+  - публичная ссылка на `Google Sheets`;
+  - прямая `HTTP(S)` ссылка на `.csv` или `.tsv`;
+- `--student`: полное имя студента для поиска строки;
+- `--group`: дополнительный сигнал для матчинга;
+- `--llm-student-match openai`: optional fallback, если эвристика не нашла студента;
+- `--llm-worksheet-structure`: по умолчанию `auto`, используется для сложных многострочных заголовков и нестандартных колонок.
 
-Output:
-- the program prints JSON to stdout
-- `--view extraction` returns raw extraction result per worksheet
-- `--view normalized` returns the normalized student-facing structure for that subject, aggregated across valid worksheets from the same source
-- `--view full` returns both source snapshot and all intermediate artifacts
+Выход:
+- программа печатает JSON в `stdout`;
+- `--view extraction` возвращает сырой extraction по листам;
+- `--view normalized` возвращает итоговую нормализованную структуру по предмету;
+- `--view full` возвращает и источник, и промежуточные артефакты пайплайна.
 
-Example normalized output shape:
+Пример normalized-ответа:
 
 ```json
 {
@@ -93,9 +142,9 @@ Example normalized output shape:
 }
 ```
 
-## Local setup
+## Локальная настройка
 
-Create and activate a virtual environment, then install the packages:
+Создайте и активируйте виртуальное окружение, затем установите зависимости:
 
 ```bash
 python3 -m venv .venv
@@ -103,20 +152,20 @@ source .venv/bin/activate
 python3 -m pip install openai python-dotenv
 ```
 
-Create a local `.env` file from the example:
+Создайте локальный `.env` из шаблона:
 
 ```bash
 cp .env.example .env
 ```
 
-Then put your key into `.env`:
+Добавьте ключ в `.env`:
 
 ```env
 OPENAI_API_KEY=your_real_key_here
 STUDY_ANALYSIS_LLM_MODEL=gpt-5-mini
 ```
 
-Enable LLM fallback for student matching:
+Включение LLM fallback для сложного матчинга:
 
 ```bash
 python3 analyze_sheet.py \
@@ -129,17 +178,17 @@ python3 analyze_sheet.py \
   --view extraction
 ```
 
-## Telegram bot scaffold
+## Telegram-бот
 
-The repository now also contains a local-first Telegram bot scaffold in `app/bot`.
+В репозитории есть локальный `Telegram`-бот в `app/bot`.
 
-Current shape:
-- `aiogram` bot handlers and keyboards
-- local `SQLite` storage for profiles and sources
-- service layer that calls `study_analysis.AnalysisPipeline`
-- a future backend seam in `app/bot/services/backend_api.py`
+Что уже реализовано:
+- хендлеры и клавиатуры на `aiogram`;
+- локальное `SQLite`-хранилище профилей и источников;
+- сервисный слой, который вызывает `study_analysis.AnalysisPipeline`;
+- задел под будущий backend seam в `app/bot/services/backend_api.py`.
 
-Run flow:
+Запуск бота:
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -147,16 +196,16 @@ export TELEGRAM_BOT_TOKEN=your_real_token_here
 python3 -m app.bot.main
 ```
 
-The bot currently assumes:
-- one Telegram user = one student profile
-- one source = one Google Sheets document for one subject
-- only public Google Sheets links are accepted in the MVP
+Текущие предположения MVP:
+- один пользователь Telegram соответствует одному профилю студента;
+- один источник соответствует одному предмету;
+- в MVP принимаются публичные `Google Sheets` ссылки.
 
-## Notes
+## Ограничения и заметки
 
-- `Google Sheets` support currently assumes the sheet is publicly readable.
-- When a Google spreadsheet has multiple worksheets, the program downloads each worksheet and aggregates valid components into one combined result.
-- For suspicious worksheets with multi-row headers or repeated numeric column labels, the program can ask the LLM to map header rows and meaningful component columns before extraction.
-- Direct URL loading assumes the URL serves CSV or TSV text.
-- If the heuristic student matcher fails, the optional LLM matcher can suggest a row, but the code still re-validates that row before accepting it.
-- The extractor is heuristic for now and is meant to become the core that later can be wrapped by `FastAPI`, Telegram, or the frontend.
+- `Google Sheets` должны быть публично читаемыми.
+- Если в одной таблице несколько worksheet, система скачивает их отдельно и агрегирует валидные компоненты в один результат по предмету.
+- Для подозрительных таблиц с многострочными заголовками или неочевидными колонками система может использовать LLM для mapping структуры.
+- Прямая загрузка по URL предполагает, что источник отдает `CSV` или `TSV`.
+- Если эвристика не находит студента, optional LLM matcher может предложить строку, но код все равно повторно валидирует результат.
+- Текущий extractor эвристический и ориентирован на надежный MVP для Telegram-бота, а не на "парсинг вообще всего".
