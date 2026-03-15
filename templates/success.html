@@ -50,10 +50,33 @@
                         <div>
                             <h2 class="section-title">Предметы</h2>
                             <p class="section-note">{{ direction }} • {{ course }} • {{ current_module }}</p>
+                            <p class="section-note" id="gradebook-note">
+                                {% if selected_subject.gradebook_available %}
+                                    {% if selected_subject.gradebook_match_type == "group_specific" %}
+                                        Найдена ведомость именно для группы {{ group_number }}
+                                    {% else %}
+                                        Найдена общая ведомость курса для группы {{ group_number }}
+                                    {% endif %}
+                                {% else %}
+                                    Для группы {{ group_number }} ведомость по выбранному предмету пока не найдена
+                                {% endif %}
+                            </p>
                         </div>
-                        <a class="button ghost-button compact-button" href="{{ statement_url }}" target="_blank" rel="noreferrer">
-                            Ведомость
-                        </a>
+                        {% if statement_url %}
+                            <a
+                                class="button ghost-button compact-button"
+                                id="gradebook-button"
+                                href="{{ statement_url }}"
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                Ведомость
+                            </a>
+                        {% else %}
+                            <span class="button ghost-button compact-button button-disabled" id="gradebook-button">
+                                Ведомость
+                            </span>
+                        {% endif %}
                     </div>
 
                     <div class="subjects-tabs">
@@ -72,6 +95,7 @@
                         data-formula-subject="{{ selected_subject.name }}"
                         data-formula-direction="{{ direction_code }}"
                         data-formula-module="{{ current_module }}"
+                        data-formula-group="{{ group_number }}"
                     >
                         <div class="focus-stat">
                             <span class="focus-label">Локальный рейтинг</span>
@@ -145,35 +169,72 @@
             const formulaText = document.getElementById("formula-text");
             const formulaLink = document.getElementById("formula-link");
             const formulaLinkFallback = document.getElementById("formula-link-fallback");
+            const gradebookButton = document.getElementById("gradebook-button");
+            const gradebookNote = document.getElementById("gradebook-note");
             const params = new URLSearchParams({
                 subject: formulaCard.dataset.formulaSubject,
                 direction: formulaCard.dataset.formulaDirection,
                 current_module: formulaCard.dataset.formulaModule,
             });
+            const gradebookParams = new URLSearchParams({
+                subject: formulaCard.dataset.formulaSubject,
+                program: formulaCard.dataset.formulaDirection,
+                group: formulaCard.dataset.formulaGroup,
+            });
 
             try {
                 const response = await fetch(`/api/subjects/formula?${params.toString()}`);
+                if (response.ok) {
+                    const payload = await response.json();
+                    if (payload.formula) {
+                        formulaText.textContent = payload.formula;
+                    }
+
+                    if (payload.formula_source_url && formulaLink) {
+                        formulaLink.href = payload.formula_source_url;
+                        formulaLink.textContent = payload.formula_source_label;
+                    }
+
+                    if (payload.formula_source_url && formulaLinkFallback) {
+                        formulaLinkFallback.outerHTML = `<a class="formula-link" id="formula-link" href="${payload.formula_source_url}" target="_blank" rel="noreferrer">${payload.formula_source_label}</a>`;
+                    }
+                }
+            } catch (error) {
+                console.debug("Formula fetch failed", error);
+            }
+
+            if (!formulaCard.dataset.formulaGroup) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/gradebooks/subject?${gradebookParams.toString()}`);
                 if (!response.ok) {
                     return;
                 }
 
                 const payload = await response.json();
-                if (!payload.formula) {
+                const gradebook = payload.gradebook;
+                if (!gradebook || !gradebook.google_sheet_url) {
                     return;
                 }
 
-                formulaText.textContent = payload.formula;
+                const noteText = gradebook.match_type === "group_specific"
+                    ? `Найдена ведомость именно для группы ${payload.group}`
+                    : `Найдена общая ведомость курса для группы ${payload.group}`;
 
-                if (payload.formula_source_url && formulaLink) {
-                    formulaLink.href = payload.formula_source_url;
-                    formulaLink.textContent = payload.formula_source_label;
+                if (gradebookButton.tagName === "A") {
+                    gradebookButton.href = gradebook.google_sheet_url;
+                    gradebookButton.textContent = "Ведомость";
+                } else {
+                    gradebookButton.outerHTML = `<a class="button ghost-button compact-button" id="gradebook-button" href="${gradebook.google_sheet_url}" target="_blank" rel="noreferrer">Ведомость</a>`;
                 }
 
-                if (payload.formula_source_url && formulaLinkFallback) {
-                    formulaLinkFallback.outerHTML = `<a class="formula-link" id="formula-link" href="${payload.formula_source_url}" target="_blank" rel="noreferrer">${payload.formula_source_label}</a>`;
+                if (gradebookNote) {
+                    gradebookNote.textContent = noteText;
                 }
             } catch (error) {
-                console.debug("Formula fetch failed", error);
+                console.debug("Gradebook fetch failed", error);
             }
         });
     </script>

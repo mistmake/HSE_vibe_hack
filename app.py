@@ -11,7 +11,14 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from formula_finder import find_subject_formula
-from gradebook_finder import DEFAULT_ACADEMIC_YEAR, find_subject_gradebook
+from gradebook_finder import (
+    DEFAULT_ACADEMIC_YEAR,
+    PROGRAM_SECTION_IDS,
+    WIKI_HUB_TITLE,
+    extract_program_section,
+    fetch_wiki_raw,
+    find_subject_gradebook,
+)
 
 
 app = FastAPI(title="HSE Vibe Hack")
@@ -296,6 +303,12 @@ def make_subject(name: str, index: int, module_value: str) -> dict:
         "formula_source_url": formula_info["source_url"],
         "formula_source_label": formula_info["source_label"],
         "formula_is_exact": formula_info["is_exact"],
+        "gradebook_url": "",
+        "gradebook_subject_page_url": "",
+        "gradebook_source_label": "",
+        "gradebook_reason": "",
+        "gradebook_match_type": "",
+        "gradebook_available": False,
     }
 
 
@@ -318,6 +331,128 @@ def parse_module_list(raw_modules: str) -> list[int]:
         if start <= end:
             return list(range(start, end + 1))
     return sorted(set(numbers))
+
+
+def extract_modules_from_text(text: str) -> list[int]:
+    patterns = [
+        re.compile(r"modules?\s*\(?\s*([0-9,\s\-–]+)", flags=re.IGNORECASE),
+        re.compile(r"\(?\s*([0-9,\s\-–]+)\s*\)?\s*модул", flags=re.IGNORECASE),
+    ]
+
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match:
+            return parse_module_list(match.group(1).replace("–", "-"))
+
+    return []
+
+
+def clean_subject_name(raw_value: str) -> str:
+    cleaned = raw_value.replace("_", " ")
+    cleaned = html.unescape(cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -\t")
+    return cleaned
+
+
+def extract_subject_labels_from_line(line: str) -> list[str]:
+    labels = []
+
+    for match in re.finditer(r"\[\[([^\]|#]+?)(?:#[^\]|]*)?(?:\s*\|\s*([^\]]+))?\]\]", line):
+        label = clean_subject_name(match.group(2) or match.group(1))
+        if label:
+            labels.append(label)
+
+    for match in re.finditer(r"\[(https?://[^\s\]]+)\s+([^\]]+)\]", line):
+        label = clean_subject_name(match.group(2))
+        if label:
+            labels.append(label)
+
+    return labels
+
+
+def split_program_cells(section_raw: str) -> list[str]:
+    cells = []
+    current_cell: list[str] = []
+
+    for raw_line in section_raw.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if stripped.startswith("|-"):
+            continue
+
+        if stripped.startswith("| colspan="):
+            break
+
+        if stripped.startswith("||"):
+            if current_cell:
+                cells.append("\n".join(current_cell).strip())
+            current_cell = [stripped[2:].lstrip()]
+            continue
+
+        if stripped == "|" or re.match(r"^\|(?:\s|$)", stripped):
+            if current_cell:
+                cells.append("\n".join(current_cell).strip())
+            current_cell = [re.sub(r"^\|\s?", "", stripped)]
+            continue
+
+        current_cell.append(line)
+
+    if current_cell:
+        cells.append("\n".join(current_cell).strip())
+
+    return [cell for cell in cells if cell and cell != "&nbsp;"]
+
+
+def load_subjects_from_wiki_hub(program_code: str, course_number: int, module_number: int) -> list[str]:
+    section_id = PROGRAM_SECTION_IDS.get(program_code)
+    if not section_id:
+        return []
+
+    hub_raw = fetch_wiki_raw(WIKI_HUB_TITLE)
+    if not hub_raw:
+        return []
+
+    try:
+        section_raw = extract_program_section(hub_raw, section_id)
+    except ValueError:
+        return []
+
+    course_cells = split_program_cells(section_raw)
+    if course_number < 1 or course_number > len(course_cells):
+        return []
+
+    target_cell = course_cells[course_number - 1]
+    subjects = []
+    seen = set()
+    active_modules: list[int] = []
+
+    for raw_line in target_cell.splitlines():
+        line = raw_line.strip()
+        if not line or line == "&nbsp;":
+            continue
+
+        if line.startswith("'''"):
+            active_modules = extract_modules_from_text(line)
+            continue
+
+        labels = extract_subject_labels_from_line(line)
+        if not labels:
+            continue
+
+        line_modules = extract_modules_from_text(line)
+        effective_modules = line_modules or active_modules
+        if effective_modules and module_number not in effective_modules:
+            continue
+
+        for label in labels:
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            subjects.append(label)
+
+    return subjects
 
 
 def html_to_text(raw_html: str) -> str:
@@ -391,13 +526,15 @@ def load_real_subjects(program_code: str, course_value: str, module_value: str) 
 
     course_number = parse_course_number(course_value)
     module_number = parse_module_number(module_value)
+    names = load_subjects_from_wiki_hub(program_code, course_number, module_number)
 
-    try:
-        raw_page = fetch_page(program["tutors_url"])
-        text = html_to_text(raw_page)
-        names = parse_courses_from_text(text, course_number, module_number)
-    except Exception:
-        names = []
+    if not names:
+        try:
+            raw_page = fetch_page(program["tutors_url"])
+            text = html_to_text(raw_page)
+            names = parse_courses_from_text(text, course_number, module_number)
+        except Exception:
+            names = []
 
     if not names:
         fallback_names = (
@@ -418,7 +555,7 @@ def load_real_subjects(program_code: str, course_value: str, module_value: str) 
             seen.add(key)
             unique_names.append(name)
 
-    return [make_subject(name, index, module_value) for index, name in enumerate(unique_names[:8])]
+    return [make_subject(name, index, module_value) for index, name in enumerate(unique_names)]
 
 
 def get_selected_subject(subject: str | None, subjects: list[dict]):
@@ -453,6 +590,35 @@ def enrich_subject_formula(subject_data: dict, direction_code: str, module_value
     enriched["formula_source_url"] = formula_result["page_url"]
     enriched["formula_source_label"] = formula_result["source_label"]
     enriched["formula_is_exact"] = formula_result["is_exact"]
+    return enriched
+
+
+def enrich_subject_gradebook(subject_data: dict, direction_code: str, group_number: str) -> dict:
+    enriched = dict(subject_data)
+
+    if not group_number:
+        return enriched
+
+    try:
+        gradebook_result = find_subject_gradebook(
+            subject_name=subject_data["name"],
+            group_name=group_number,
+            program_code=direction_code,
+            use_gpt=True,
+        )
+    except Exception:
+        gradebook_result = None
+
+    if not gradebook_result:
+        return enriched
+
+    gradebook = gradebook_result["gradebook"]
+    enriched["gradebook_url"] = gradebook["google_sheet_url"]
+    enriched["gradebook_subject_page_url"] = gradebook["subject_page_url"]
+    enriched["gradebook_source_label"] = "Ведомость из wiki ФКН"
+    enriched["gradebook_reason"] = gradebook["reason"]
+    enriched["gradebook_match_type"] = gradebook["match_type"]
+    enriched["gradebook_available"] = True
     return enriched
 
 
@@ -568,17 +734,19 @@ async def success(request: Request, subject: str | None = None):
     direction_code = request.session.get("direction", "PI")
     course_value = request.session.get("course", "1 курс")
     module_value = request.session.get("current_module", "1 модуль")
+    group_number = request.session.get("group_number", "")
     subject_payload = build_subject_payload(direction_code, course_value, module_value)
     subjects = subject_payload["subjects"]
     selected_index, selected_subject = get_selected_subject(subject, subjects)
     selected_subject = enrich_subject_formula(selected_subject, direction_code, module_value)
+    selected_subject = enrich_subject_gradebook(selected_subject, direction_code, group_number)
 
     return templates.TemplateResponse(
         request,
         "success.html",
         {
             "full_name": request.session.get("full_name", "Имя Фамилия"),
-            "group_number": request.session.get("group_number", ""),
+            "group_number": group_number,
             "course": course_value,
             "current_module": module_value,
             "direction": request.session.get("direction_name", direction_code),
@@ -589,7 +757,7 @@ async def success(request: Request, subject: str | None = None):
             "selected_index": selected_index,
             "preliminary_rank": "12",
             "average_score": "5.4",
-            "statement_url": STATEMENT_URL,
+            "statement_url": selected_subject["gradebook_url"],
         },
     )
 
@@ -599,14 +767,16 @@ async def profile_api(request: Request, subject: str | None = None):
     direction_code = request.session.get("direction", "PI")
     course_value = request.session.get("course", "1 курс")
     module_value = request.session.get("current_module", "1 модуль")
+    group_number = request.session.get("group_number", "")
     subject_payload = build_subject_payload(direction_code, course_value, module_value)
     subjects = subject_payload["subjects"]
     selected_index, selected_subject = get_selected_subject(subject, subjects)
     selected_subject = enrich_subject_formula(selected_subject, direction_code, module_value)
+    selected_subject = enrich_subject_gradebook(selected_subject, direction_code, group_number)
 
     return {
         "full_name": request.session.get("full_name", "Имя Фамилия"),
-        "group_number": request.session.get("group_number", ""),
+        "group_number": group_number,
         "direction": request.session.get("direction_name", direction_code),
         "direction_code": direction_code,
         "course": course_value,
@@ -617,7 +787,7 @@ async def profile_api(request: Request, subject: str | None = None):
         "subjects": subjects,
         "selected_index": selected_index,
         "selected_subject": selected_subject,
-        "statement_url": STATEMENT_URL,
+        "statement_url": selected_subject["gradebook_url"],
     }
 
 

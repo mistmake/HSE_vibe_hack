@@ -305,6 +305,12 @@ select.input:invalid {
     min-width: 88px;
 }
 
+.button-disabled {
+    opacity: 0.6;
+    cursor: default;
+    pointer-events: none;
+}
+
 .dashboard-shell {
     min-height: 100vh;
     padding: 28px;

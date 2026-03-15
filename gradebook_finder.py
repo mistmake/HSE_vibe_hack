@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 from dataclasses import asdict, dataclass
+from difflib import SequenceMatcher
 from functools import lru_cache
 
 from openai_json_client import call_openai_json, has_openai_api_key
@@ -144,8 +145,65 @@ def extract_subject_pages(section_raw: str) -> list[dict[str, str]]:
     return links
 
 
+def locate_subject_page(subject_name: str, program_code: str) -> dict[str, str]:
+    resolved_program = normalize_program_code(program_code, program_code)
+    section_id = PROGRAM_SECTION_IDS.get(resolved_program)
+    if not section_id:
+        raise ValueError(f"Для программы {resolved_program} пока нет секции на wiki.")
+
+    hub_raw = fetch_wiki_raw(WIKI_HUB_TITLE)
+    section_raw = extract_program_section(hub_raw, section_id)
+    subject_pages = extract_subject_pages(section_raw)
+    if not subject_pages:
+        raise ValueError(f"Для программы {resolved_program} не найдены страницы предметов на wiki.")
+
+    lookup = normalize_subject_key(subject_name)
+    exact_matches = []
+    partial_matches = []
+    scored_matches = []
+
+    for page in subject_pages:
+        candidates = [
+            normalize_subject_key(page["label"]),
+            normalize_subject_key(page["title"]),
+        ]
+
+        if lookup in candidates:
+            exact_matches.append(page)
+            continue
+
+        if any(lookup and (lookup in candidate or candidate in lookup) for candidate in candidates):
+            partial_matches.append(page)
+            continue
+
+        score = max(SequenceMatcher(None, lookup, candidate).ratio() for candidate in candidates)
+        scored_matches.append((score, page))
+
+    if exact_matches:
+        exact_matches.sort(key=lambda page: len(page["label"]))
+        return exact_matches[0]
+
+    if partial_matches:
+        partial_matches.sort(key=lambda page: len(page["label"]))
+        return partial_matches[0]
+
+    scored_matches.sort(key=lambda item: item[0], reverse=True)
+    if not scored_matches or scored_matches[0][0] < 0.45:
+        raise ValueError(f"Не удалось сопоставить предмет '{subject_name}' со страницей wiki.")
+
+    return scored_matches[0][1]
+
+
 def find_exact_group_sheet(raw_text: str, group_code: str) -> str | None:
-    return extract_exact_group_sheets(raw_text).get(group_code)
+    exact_match = extract_exact_group_sheets(raw_text).get(group_code)
+    if exact_match:
+        return exact_match
+
+    bucket_match = extract_bucket_group_sheets(raw_text).get(group_code.split("-")[0])
+    if bucket_match:
+        return bucket_match
+
+    return None
 
 
 def extract_group_codes(raw_text: str) -> list[str]:
@@ -176,9 +234,41 @@ def extract_exact_group_sheets(raw_text: str) -> dict[str, str]:
     return matches
 
 
+def extract_bucket_group_sheets(raw_text: str) -> dict[str, str]:
+    matches: dict[str, str] = {}
+
+    for line in raw_text.splitlines():
+        if "docs.google.com/spreadsheets" not in line:
+            continue
+
+        labels_and_urls = re.findall(
+            r"\[(https://docs\.google\.com/spreadsheets/d/[A-Za-z0-9\-_]+(?:/[^\s\]]*)?)\s+([^\]]+)\]",
+            line,
+        )
+        if not labels_and_urls:
+            continue
+
+        for url, label in labels_and_urls:
+            bucket_match = re.search(r"\b(25\d)\b", label)
+            if bucket_match:
+                matches[bucket_match.group(1)] = url.rstrip(").,>")
+
+    return matches
+
+
 def find_shared_sheet(raw_text: str) -> tuple[str | None, str]:
     lines = raw_text.splitlines()
-    positive_markers = ("results", "grades", "google table", "gradebook", "ведом", "оцен")
+    positive_markers = (
+        "results",
+        "grades",
+        "google table",
+        "gradebook",
+        "ведом",
+        "оцен",
+        "current performance",
+        "performance",
+        "the table",
+    )
     negative_markers = ("telegram", "classroom", "register", "interview", "itinerary")
 
     for index, line in enumerate(lines):
@@ -195,6 +285,19 @@ def find_shared_sheet(raw_text: str) -> tuple[str | None, str]:
             continue
 
         if any(marker in lowered for marker in positive_markers):
+            return urls[0], context.strip()
+
+    for index, line in enumerate(lines):
+        if "docs.google.com/spreadsheets" not in line:
+            continue
+
+        context = " ".join(lines[max(0, index - 2): min(len(lines), index + 2)])
+        lowered = context.lower()
+        if any(marker in lowered for marker in negative_markers):
+            continue
+
+        urls = extract_urls(context)
+        if urls:
             return urls[0], context.strip()
 
     return None, ""
@@ -263,6 +366,106 @@ def call_openai_for_gradebook(
         )
     except Exception:
         return None
+
+
+def find_gradebook_on_subject_page(
+    *,
+    subject_name: str,
+    group_name: str,
+    program_code: str | None = None,
+    academic_year: str = DEFAULT_ACADEMIC_YEAR,
+    use_gpt: bool = True,
+) -> dict | None:
+    if academic_year != DEFAULT_ACADEMIC_YEAR:
+        raise ValueError(f"Сейчас модуль настроен на учебный год {DEFAULT_ACADEMIC_YEAR}.")
+
+    resolved_program = normalize_program_code(program_code, group_name)
+    group_code = normalize_group(group_name)
+    subject_page = locate_subject_page(subject_name, resolved_program)
+    page_title = subject_page["title"]
+    page_url = wiki_page_url(page_title)
+    raw_text = fetch_wiki_raw(page_title)
+
+    if not raw_text:
+        return None
+
+    exact_link = find_exact_group_sheet(raw_text, group_code)
+    if exact_link:
+        match = GradebookMatch(
+            subject_name=subject_page["label"],
+            subject_page_title=page_title,
+            subject_page_url=page_url,
+            group=group_code,
+            google_sheet_url=exact_link,
+            match_type="group_specific",
+            source="wiki_regex",
+            reason=f"На странице предмета найдена отдельная ведомость для группы {group_code}.",
+        )
+        return {
+            "program_code": resolved_program,
+            "group": group_code,
+            "academic_year": academic_year,
+            "used_gpt": False,
+            "subject_query": subject_name,
+            "gradebook": asdict(match),
+            "candidates_found": 1,
+        }
+
+    shared_link, shared_context = find_shared_sheet(raw_text)
+    if shared_link:
+        match = GradebookMatch(
+            subject_name=subject_page["label"],
+            subject_page_title=page_title,
+            subject_page_url=page_url,
+            group=group_code,
+            google_sheet_url=shared_link,
+            match_type="shared",
+            source="wiki_regex_fallback",
+            reason=(
+                "На странице предмета не нашлось отдельной ведомости по группам, "
+                "поэтому возвращена общая results/grades-таблица. "
+                f"Контекст: {shared_context[:180]}"
+            ),
+        )
+        return {
+            "program_code": resolved_program,
+            "group": group_code,
+            "academic_year": academic_year,
+            "used_gpt": False,
+            "subject_query": subject_name,
+            "gradebook": asdict(match),
+            "candidates_found": 1,
+        }
+
+    if use_gpt and "docs.google.com/spreadsheets" in raw_text:
+        gpt_result = call_openai_for_gradebook(
+            subject_name=subject_page["label"],
+            subject_page_title=page_title,
+            raw_text=raw_text,
+            group_code=group_code,
+        )
+        if gpt_result and gpt_result.get("selected_link"):
+            match = GradebookMatch(
+                subject_name=subject_page["label"],
+                subject_page_title=page_title,
+                subject_page_url=page_url,
+                group=group_code,
+                google_sheet_url=gpt_result["selected_link"],
+                match_type=gpt_result.get("match_type", "shared"),
+                source="gpt_api",
+                reason=gpt_result.get("reason", "Ссылка выбрана моделью по содержимому страницы предмета."),
+            )
+            return {
+                "program_code": resolved_program,
+                "group": group_code,
+                "academic_year": academic_year,
+                "used_gpt": bool(has_openai_api_key()),
+                "subject_query": subject_name,
+                "gradebook": asdict(match),
+                "candidates_found": 1,
+            }
+
+    return None
 
 
 def collect_program_gradebooks(
@@ -445,6 +648,16 @@ def find_subject_gradebook(
     academic_year: str = DEFAULT_ACADEMIC_YEAR,
     use_gpt: bool = True,
 ) -> dict | None:
+    direct_result = find_gradebook_on_subject_page(
+        subject_name=subject_name,
+        group_name=group_name,
+        program_code=program_code,
+        academic_year=academic_year,
+        use_gpt=use_gpt,
+    )
+    if direct_result:
+        return direct_result
+
     result = find_group_gradebooks(
         group_name=group_name,
         program_code=program_code,
