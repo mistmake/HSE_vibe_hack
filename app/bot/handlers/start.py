@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import asyncio
-
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot.callbacks import ProgramCallback
-from app.bot.formatters import format_clarification, format_profile, format_summary, format_sync_report
-from app.bot.keyboards import clarification_keyboard, main_menu_keyboard, program_keyboard
+from app.bot.formatters import format_profile
+from app.bot.handlers.sources import prompt_source_selection
+from app.bot.keyboards import main_menu_keyboard, program_keyboard
 from app.bot.services.contracts import StudyBotService
 from app.bot.services.session_service import SessionService
 from app.bot.states import BotStates
@@ -45,7 +44,7 @@ def build_start_router(service: StudyBotService, sessions: SessionService) -> Ro
         await state.update_data(program_code=callback_data.code)
         await state.set_state(BotStates.onboarding_group)
         await callback.message.answer(
-            "Теперь пришли группу, например `БПАД 257-1` или `257-1`.",
+            "Теперь пришли группу, например `БПАД 257-1`, `257-1`, `БПМИ256` или `256`.",
             parse_mode="Markdown",
         )
 
@@ -71,31 +70,12 @@ def build_start_router(service: StudyBotService, sessions: SessionService) -> Ro
             reply_markup=main_menu_keyboard(),
         )
         await message.answer(format_profile(profile))
-        try:
-            sources = await asyncio.to_thread(
-                service.sync_and_analyze_profile,
-                message.from_user.id,
-            )
-        except ValueError as exc:
-            await message.answer(str(exc))
-            return
-        await message.answer(format_sync_report(sources))
-        await message.answer(format_summary(sources))
-        for source in sources:
-            sessions.set_last_source(message.from_user.id, source.id)
-        next_source = next(
-            (
-                source
-                for source in sources
-                if source.status == "needs_clarification" and source.clarification is not None
-            ),
-            None,
+        await prompt_source_selection(
+            message,
+            service,
+            sessions,
+            intro_text="Подбираю ведомости по профилю.",
         )
-        if next_source is not None and next_source.clarification is not None:
-            await message.answer(
-                format_clarification(next_source.clarification),
-                reply_markup=clarification_keyboard(next_source.id, next_source.clarification),
-            )
 
     @router.message(F.text == "Сводка")
     async def menu_summary(message: Message) -> None:

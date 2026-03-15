@@ -17,3 +17,8 @@ class ClarificationCallback(CallbackData, prefix="clarify"):
 
 class ProgramCallback(CallbackData, prefix="program"):
     code: str
+
+
+class SourceSelectionCallback(CallbackData, prefix="source_select"):
+    action: str
+    index: int = 0

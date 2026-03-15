@@ -1,6 +1,8 @@
 import unittest
+import io
 from pathlib import Path
 from unittest.mock import patch
+import zipfile
 
 from study_analysis.fetchers import load_source
 from study_analysis.llm import LLMStudentMatchSuggestion
@@ -60,6 +62,68 @@ class FakeStructureAnalyzerWithoutComponents:
 
 
 class AnalysisPipelineTestCase(unittest.TestCase):
+    @staticmethod
+    def _build_xlsx_workbook() -> bytes:
+        content = io.BytesIO()
+        with zipfile.ZipFile(content, "w") as workbook_zip:
+            workbook_zip.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Grade" sheetId="1" r:id="rId1"/>
+    <sheet name="Data" sheetId="2" state="hidden" r:id="rId2"/>
+  </sheets>
+</workbook>""",
+            )
+            workbook_zip.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+</Relationships>""",
+            )
+            workbook_zip.writestr(
+                "xl/sharedStrings.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="4" uniqueCount="4">
+  <si><t>Student</t></si>
+  <si><t>Group</t></si>
+  <si><t>Иванов И.И.</t></si>
+  <si><t>БПМИ231</t></si>
+</sst>""",
+            )
+            workbook_zip.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="s"><v>0</v></c>
+      <c r="B1" t="s"><v>1</v></c>
+      <c r="C1" t="inlineStr"><is><t>HW 40% / 10</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="s"><v>2</v></c>
+      <c r="B2" t="s"><v>3</v></c>
+      <c r="C2"><v>8</v></c>
+    </row>
+  </sheetData>
+</worksheet>""",
+            )
+            workbook_zip.writestr(
+                "xl/worksheets/sheet2.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>Hidden</t></is></c></row>
+  </sheetData>
+</worksheet>""",
+            )
+        return content.getvalue()
+
     def test_local_csv_pipeline_returns_normalized_subject(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "algorithms.csv"
         result = AnalysisPipeline().analyze(
@@ -144,6 +208,28 @@ class AnalysisPipelineTestCase(unittest.TestCase):
         self.assertEqual(len(source.worksheets), 2)
         self.assertEqual(source.worksheets[0].gid, "0")
         self.assertEqual(source.worksheets[1].title, "Controls")
+
+    @patch("study_analysis.fetchers._read_bytes_from_url")
+    @patch("study_analysis.fetchers._read_text_from_url")
+    def test_google_sheet_falls_back_to_xlsx_when_sheet_entries_are_missing(
+        self,
+        read_text_from_url,
+        read_bytes_from_url,
+    ) -> None:
+        def fake_read_text(url: str):
+            if url.endswith("/edit"):
+                return ('<title>English 2026 - Google Sheets</title><script>bootstrapData={}</script>', "text/html")
+            raise AssertionError(f"Unexpected CSV export attempt for {url}")
+
+        read_text_from_url.side_effect = fake_read_text
+        read_bytes_from_url.return_value = (self._build_xlsx_workbook(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        source = load_source("https://docs.google.com/spreadsheets/d/demo/")
+
+        self.assertEqual(source.title, "English 2026")
+        self.assertEqual(len(source.worksheets), 1)
+        self.assertEqual(source.worksheets[0].title, "Grade")
+        self.assertEqual(source.worksheets[0].rows[1][0], "Иванов И.И.")
 
     @patch("study_analysis.pipeline.load_source")
     def test_pipeline_aggregates_multiple_worksheets_into_one_subject(self, mocked_load_source) -> None:
@@ -245,6 +331,64 @@ class AnalysisPipelineTestCase(unittest.TestCase):
         subject = result.normalized.subjects[0]
         self.assertEqual(subject.name, "Algorithms 2026")
         self.assertEqual([component.name for component in subject.components], ["Homeworks 1", "Homeworks 2"])
+
+    @patch("study_analysis.pipeline.load_source")
+    def test_pipeline_merges_two_row_headers_without_llm(self, mocked_load_source) -> None:
+        mocked_load_source.return_value = SourceDocument(
+            source_url="local",
+            source_type="local_file",
+            title="Algorithms 2026",
+            worksheets=[
+                WorksheetSnapshot(
+                    title="Complex",
+                    gid="local",
+                    rows=[
+                        ["Student", "HW", "", "Exam", ""],
+                        ["", "1", "2", "written", "oral"],
+                        ["Иванов И.И.", "7", "8", "6", "9"],
+                    ],
+                )
+            ],
+        )
+
+        result = AnalysisPipeline().analyze(
+            source="local",
+            full_name="Иванов Иван Иванович",
+            group=None,
+        )
+
+        subject = result.normalized.subjects[0]
+        self.assertEqual(
+            [component.name for component in subject.components],
+            ["HW 1", "HW 2", "Exam written", "Exam oral"],
+        )
+
+    @patch("study_analysis.pipeline.load_source")
+    def test_pipeline_extracts_decimal_weights_from_headers(self, mocked_load_source) -> None:
+        mocked_load_source.return_value = SourceDocument(
+            source_url="local",
+            source_type="local_file",
+            title="Entrepreneurship",
+            worksheets=[
+                WorksheetSnapshot(
+                    title="Gradebook",
+                    gid="local",
+                    rows=[
+                        ["Student", "0.3 * Project", "0,2 * Cases", "0.4xExam"],
+                        ["Иванов И.И.", "8", "7", "6"],
+                    ],
+                )
+            ],
+        )
+
+        result = AnalysisPipeline().analyze(
+            source="local",
+            full_name="Иванов Иван Иванович",
+            group=None,
+        )
+
+        components = result.worksheets[0].extraction.grading_scheme.components
+        self.assertEqual([component.weight for component in components], [0.3, 0.2, 0.4])
 
 
 if __name__ == "__main__":

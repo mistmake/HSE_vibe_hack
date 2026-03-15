@@ -95,6 +95,10 @@ def format_subject_details(source: StoredSource) -> str:
         lines.append("Предупреждения:")
         for warning in warnings[:3]:
             lines.append(f"- {warning}")
+    if source.manual_formula is not None:
+        lines.append("")
+        lines.append("Формула:")
+        lines.append(f"- {source.manual_formula.formula_text}")
     lines.append("")
     lines.append(f"Источник: {source.source_url}")
     return "\n".join(lines)

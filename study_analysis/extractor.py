@@ -346,9 +346,12 @@ def _parse_number(value: str) -> float | None:
 
 def _extract_weight(header: str) -> float | None:
     percent_match = re.search(r"(\d+(?:[.,]\d+)?)\s*%", header)
-    if not percent_match:
-        return None
-    return float(percent_match.group(1).replace(",", ".")) / 100.0
+    if percent_match:
+        return float(percent_match.group(1).replace(",", ".")) / 100.0
+    coefficient_match = re.search(r"(?<!\d)(0(?:[.,]\d+)?|1(?:[.,]0+)?)\s*[*xх×]", header, flags=re.IGNORECASE)
+    if coefficient_match:
+        return float(coefficient_match.group(1).replace(",", "."))
+    return None
 
 
 def _extract_max_score(header: str) -> float | None:

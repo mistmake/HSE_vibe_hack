@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from dataclasses import dataclass
@@ -22,6 +23,20 @@ class LLMStudentMatchSuggestion:
     reason: str
 
 
+@dataclass
+class FormulaWeightItem:
+    name: str
+    weight: float
+
+
+@dataclass
+class FormulaParseResult:
+    formula_text: str
+    components: list[FormulaWeightItem]
+    confidence: float
+    reason: str
+
+
 class StudentRowMatcher(Protocol):
     def match_student_row(
         self,
@@ -37,6 +52,14 @@ class WorksheetStructureAnalyzer(Protocol):
         worksheet: WorksheetSnapshot,
         student_query: StudentQuery,
     ) -> WorksheetStructureHint | None:
+        ...
+
+
+class FormulaWeightParser(Protocol):
+    def parse_formula_text(self, formula_text: str) -> FormulaParseResult:
+        ...
+
+    def parse_formula_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FormulaParseResult:
         ...
 
 
@@ -202,6 +225,98 @@ class OpenAIWorksheetStructureAnalyzer:
         )
 
 
+class OpenAIFormulaWeightParser:
+    def __init__(self, model: str | None = None) -> None:
+        _load_dotenv_if_available()
+        self.model = model or os.getenv("STUDY_ANALYSIS_LLM_MODEL", "gpt-5-mini")
+
+    def parse_formula_text(self, formula_text: str) -> FormulaParseResult:
+        payload = self._create_response(
+            [
+                {
+                    "type": "input_text",
+                    "text": (
+                        "Parse this grading formula into weighted components. "
+                        "Return normalized weights that sum to 1.0.\n\n"
+                        f"{formula_text}"
+                    ),
+                }
+            ]
+        )
+        return _formula_parse_result_from_payload(payload)
+
+    def parse_formula_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FormulaParseResult:
+        data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        payload = self._create_response(
+            [
+                {
+                    "type": "input_text",
+                    "text": (
+                        "Read the grading formula from this image and extract weighted components. "
+                        "Return normalized weights that sum to 1.0."
+                    ),
+                },
+                {
+                    "type": "input_image",
+                    "image_url": data_url,
+                },
+            ]
+        )
+        return _formula_parse_result_from_payload(payload)
+
+    def _create_response(self, content: list[dict]) -> dict:
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError("OpenAI formula parser requires the 'openai' package to be installed.") from exc
+
+        client = OpenAI()
+        response = client.responses.create(
+            model=self.model,
+            instructions=(
+                "You extract grading formulas from course materials. "
+                "Return JSON only. Normalize all weights so they sum to 1.0. "
+                "Use compact component names taken from the source formula."
+            ),
+            input=[
+                {
+                    "role": "user",
+                    "content": content,
+                }
+            ],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "formula_weights",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "formula_text": {"type": "string"},
+                            "components": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "weight": {"type": "number"},
+                                    },
+                                    "required": ["name", "weight"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "confidence": {"type": "number"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["formula_text", "components", "confidence", "reason"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+        )
+        return json.loads(response.output_text)
+
+
 def _build_match_prompt(prepared: PreparedWorksheet, student_query: StudentQuery) -> str:
     rows = []
     for index, row in enumerate(prepared.data_rows[:120]):
@@ -260,3 +375,16 @@ def _load_dotenv_if_available() -> None:
     except ImportError:
         return
     load_dotenv()
+
+
+def _formula_parse_result_from_payload(payload: dict) -> FormulaParseResult:
+    components = [
+        FormulaWeightItem(name=item["name"], weight=float(item["weight"]))
+        for item in payload["components"]
+    ]
+    return FormulaParseResult(
+        formula_text=payload["formula_text"],
+        components=components,
+        confidence=float(payload["confidence"]),
+        reason=payload["reason"],
+    )

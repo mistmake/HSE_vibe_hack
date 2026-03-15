@@ -8,6 +8,7 @@ class BotStates(StatesGroup):
     profile_edit_full_name = State()
     profile_edit_group = State()
     waiting_source_url = State()
+    waiting_formula_input = State()
     confirm_source = State()
     analysis_running = State()
     clarify_student_match = State()

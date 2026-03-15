@@ -25,11 +25,21 @@ class ClarificationRequest:
 
 
 @dataclass(slots=True)
+class ManualFormulaOverride:
+    formula_text: str
+    weights: dict[str, float] = field(default_factory=dict)
+    parser_confidence: float = 0.0
+    source_type: str = "text"
+    reason: str | None = None
+
+
+@dataclass(slots=True)
 class StoredSource:
     id: int
     telegram_id: int
     source_url: str
     source_type: str
+    source_metadata: dict[str, Any]
     status: str
     subject_name: str | None
     overall_confidence: float | None
@@ -37,6 +47,7 @@ class StoredSource:
     last_error: str | None
     analysis_result: dict[str, Any] | None
     clarification: ClarificationRequest | None
+    manual_formula: ManualFormulaOverride | None
     created_at: str
     updated_at: str
 

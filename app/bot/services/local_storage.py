@@ -6,7 +6,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.bot.domain import BotProfile, ClarificationRequest, StoredSource
+from app.bot.domain import BotProfile, ClarificationRequest, ManualFormulaOverride, StoredSource
 
 
 def utc_now_iso() -> str:
@@ -45,6 +45,7 @@ class SQLiteStorage:
                     telegram_id INTEGER NOT NULL,
                     source_url TEXT NOT NULL,
                     source_type TEXT NOT NULL,
+                    source_metadata_json TEXT,
                     status TEXT NOT NULL,
                     subject_name TEXT,
                     overall_confidence REAL,
@@ -52,6 +53,7 @@ class SQLiteStorage:
                     last_error TEXT,
                     analysis_result_json TEXT,
                     clarification_json TEXT,
+                    manual_formula_json TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(telegram_id, source_url)
@@ -59,6 +61,8 @@ class SQLiteStorage:
                 """
             )
             _ensure_column(connection, "profiles", "program_code", "TEXT")
+            _ensure_column(connection, "sources", "manual_formula_json", "TEXT")
+            _ensure_column(connection, "sources", "source_metadata_json", "TEXT")
 
 
 class ProfileRepository:
@@ -118,21 +122,24 @@ class SourceRepository:
         telegram_id: int,
         source_url: str,
         source_type: str,
+        source_metadata: dict | None = None,
         subject_name: str | None = None,
         progress_message: str | None = None,
     ) -> StoredSource:
         now = utc_now_iso()
+        source_metadata_json = json.dumps(source_metadata or {}, ensure_ascii=False)
         with self.storage._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO sources (
-                    telegram_id, source_url, source_type, status, subject_name,
+                    telegram_id, source_url, source_type, source_metadata_json, status, subject_name,
                     overall_confidence, progress_message, last_error,
-                    analysis_result_json, clarification_json, created_at, updated_at
+                    analysis_result_json, clarification_json, manual_formula_json, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, NULL, ?, ?)
                 ON CONFLICT(telegram_id, source_url) DO UPDATE SET
                     source_type = excluded.source_type,
+                    source_metadata_json = excluded.source_metadata_json,
                     subject_name = COALESCE(excluded.subject_name, sources.subject_name),
                     status = excluded.status,
                     progress_message = excluded.progress_message,
@@ -142,6 +149,7 @@ class SourceRepository:
                     telegram_id,
                     source_url,
                     source_type,
+                    source_metadata_json,
                     "created",
                     subject_name,
                     progress_message or "Источник сохранен.",
@@ -177,21 +185,28 @@ class SourceRepository:
             if source.clarification is not None
             else None
         )
+        manual_formula_json = (
+            json.dumps(asdict(source.manual_formula), ensure_ascii=False)
+            if source.manual_formula is not None
+            else None
+        )
         analysis_result_json = (
             json.dumps(source.analysis_result, ensure_ascii=False)
             if source.analysis_result is not None
             else None
         )
+        source_metadata_json = json.dumps(source.source_metadata, ensure_ascii=False)
         updated_at = utc_now_iso()
         with self.storage._connect() as connection:
             connection.execute(
                 """
                 UPDATE sources
-                SET status = ?, subject_name = ?, overall_confidence = ?, progress_message = ?,
-                    last_error = ?, analysis_result_json = ?, clarification_json = ?, updated_at = ?
+                SET source_metadata_json = ?, status = ?, subject_name = ?, overall_confidence = ?, progress_message = ?,
+                    last_error = ?, analysis_result_json = ?, clarification_json = ?, manual_formula_json = ?, updated_at = ?
                 WHERE id = ? AND telegram_id = ?
                 """,
                 (
+                    source_metadata_json,
                     source.status,
                     source.subject_name,
                     source.overall_confidence,
@@ -199,6 +214,7 @@ class SourceRepository:
                     source.last_error,
                     analysis_result_json,
                     clarification_json,
+                    manual_formula_json,
                     updated_at,
                     source.id,
                     source.telegram_id,
@@ -216,12 +232,19 @@ def _row_to_source(row: sqlite3.Row | None) -> StoredSource | None:
     if clarification_raw:
         clarification_payload = json.loads(clarification_raw)
         clarification = ClarificationRequest(**clarification_payload)
+    manual_formula_raw = row["manual_formula_json"]
+    manual_formula = None
+    if manual_formula_raw:
+        manual_formula_payload = json.loads(manual_formula_raw)
+        manual_formula = ManualFormulaOverride(**manual_formula_payload)
     analysis_result = json.loads(row["analysis_result_json"]) if row["analysis_result_json"] else None
+    source_metadata = json.loads(row["source_metadata_json"]) if row["source_metadata_json"] else {}
     return StoredSource(
         id=row["id"],
         telegram_id=row["telegram_id"],
         source_url=row["source_url"],
         source_type=row["source_type"],
+        source_metadata=source_metadata,
         status=row["status"],
         subject_name=row["subject_name"],
         overall_confidence=row["overall_confidence"],
@@ -229,6 +252,7 @@ def _row_to_source(row: sqlite3.Row | None) -> StoredSource | None:
         last_error=row["last_error"],
         analysis_result=analysis_result,
         clarification=clarification,
+        manual_formula=manual_formula,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

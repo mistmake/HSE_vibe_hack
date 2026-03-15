@@ -98,6 +98,8 @@ class AnalysisPipeline:
 def _structure_looks_suspicious(prepared: PreparedWorksheet) -> bool:
     if not prepared.headers:
         return True
+    if len(prepared.header_row_indices) > 1:
+        return True
     numeric_headers = sum(1 for header in prepared.headers if _is_mostly_numeric_header(header))
     non_empty_headers = [header for header in prepared.headers if header.strip()]
     repeated_headers = len(non_empty_headers) != len(set(non_empty_headers))
