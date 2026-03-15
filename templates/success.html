@@ -44,20 +44,33 @@
                     <a class="button ghost-button compact-button" href="{{ url_for('index') }}">Назад</a>
                 </div>
 
-                <div class="subjects-list">
+                <div class="subjects-tabs">
                     {% for subject in subjects %}
-                        <article class="subject-row">
-                            <div class="subject-main">
-                                <h2>{{ subject.name }}</h2>
-                                <p>Локальный рейтинг: {{ subject.local_rank }}</p>
-                            </div>
-                            <div class="subject-score">
-                                <span>Текущий балл</span>
-                                <strong>{{ subject.score }}</strong>
-                            </div>
-                        </article>
+                        <a
+                            class="subject-tab {% if selected_index == loop.index0 %}subject-tab-active{% endif %}"
+                            href="{{ url_for('success') }}?subject={{ loop.index }}"
+                        >
+                            {{ subject.name }}
+                        </a>
                     {% endfor %}
                 </div>
+
+                <article class="subject-detail-card">
+                    <div class="subject-detail-stat">
+                        <span>Локальный рейтинг</span>
+                        <strong>{{ selected_subject.local_rank }}</strong>
+                    </div>
+
+                    <div class="subject-detail-main">
+                        <p class="subject-detail-label">Предмет</p>
+                        <h2>{{ selected_subject.name }}</h2>
+                    </div>
+
+                    <div class="subject-detail-score">
+                        <span>Текущий балл</span>
+                        <strong>{{ selected_subject.score }}</strong>
+                    </div>
+                </article>
             </section>
         </section>
     </main>

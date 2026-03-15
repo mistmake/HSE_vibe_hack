@@ -50,12 +50,23 @@ def success():
         {"name": "Дискретная математика", "local_rank": "63/220", "score": "4.8"},
         {"name": "Английский язык", "local_rank": "34/220", "score": "5.4"},
     ]
+    selected_index = request.args.get("subject", "1")
+
+    try:
+        selected_index = int(selected_index) - 1
+    except ValueError:
+        selected_index = 0
+
+    if selected_index < 0 or selected_index >= len(subjects):
+        selected_index = 0
 
     return render_template(
         "success.html",
         full_name=session.get("full_name", "Имя Фамилия"),
         automats=automats,
         subjects=subjects,
+        selected_subject=subjects[selected_index],
+        selected_index=selected_index,
         preliminary_rank="12",
         average_score="5.4",
     )
