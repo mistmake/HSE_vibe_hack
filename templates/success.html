@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Учебный профиль</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}">
 </head>
 <body class="success-body">
     <main class="profile-shell">
@@ -41,14 +41,14 @@
             <section class="subjects-panel">
                 <div class="subjects-header">
                     <p class="panel-title">Предметы</p>
-                    <a class="button ghost-button compact-button" href="{{ url_for('index') }}">Назад</a>
+                    <a class="button ghost-button compact-button" href="{{ request.url_for('index') }}">Назад</a>
                 </div>
 
                 <div class="subjects-tabs">
                     {% for subject in subjects %}
                         <a
                             class="subject-tab {% if selected_index == loop.index0 %}subject-tab-active{% endif %}"
-                            href="{{ url_for('success') }}?subject={{ loop.index }}"
+                            href="{{ request.url_for('success') }}?subject={{ loop.index }}"
                         >
                             {{ subject.name }}
                         </a>

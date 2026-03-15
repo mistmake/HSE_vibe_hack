@@ -1,76 +1,109 @@
-from flask import Flask, redirect, render_template, request, session, url_for
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 
-app = Flask(__name__)
-app.secret_key = "hackathon-demo-secret"
+app = FastAPI(title="HSE Vibe Hack")
+app.add_middleware(SessionMiddleware, secret_key="hackathon-demo-secret")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    full_name = ""
-    group_number = ""
-    direction = ""
-    directions = [
-        "Программная инженерия",
-        "Дизайн",
-        "Аналитика",
-        "Маркетинг",
-        "Менеджмент",
-    ]
+DIRECTIONS = [
+    "Программная инженерия",
+    "Дизайн",
+    "Аналитика",
+    "Маркетинг",
+    "Менеджмент",
+]
 
-    if request.method == "POST":
-        full_name = request.form.get("full_name", "").strip()
-        group_number = request.form.get("group_number", "").strip()
-        direction = request.form.get("direction", "").strip()
-        session["full_name"] = full_name
-        session["group_number"] = group_number
-        session["direction"] = direction
-        return redirect(url_for("success"))
+AUTOMATS = [
+    "Высшая математика",
+    "Алгоритмы и структуры данных",
+    "Академическое письмо",
+    "Английский язык",
+]
 
-    return render_template(
-        "index.html",
-        full_name=full_name,
-        group_number=group_number,
-        direction=direction,
-        directions=directions,
-    )
+SUBJECTS = [
+    {"name": "Программирование", "local_rank": "56/220", "score": "4.5"},
+    {"name": "Математический анализ", "local_rank": "41/220", "score": "5.2"},
+    {"name": "Дискретная математика", "local_rank": "63/220", "score": "4.8"},
+    {"name": "Английский язык", "local_rank": "34/220", "score": "5.4"},
+]
 
 
-@app.route("/success")
-def success():
-    automats = [
-        "Высшая математика",
-        "Алгоритмы и структуры данных",
-        "Академическое письмо",
-        "Английский язык",
-    ]
-    subjects = [
-        {"name": "Программирование", "local_rank": "56/220", "score": "4.5"},
-        {"name": "Математический анализ", "local_rank": "41/220", "score": "5.2"},
-        {"name": "Дискретная математика", "local_rank": "63/220", "score": "4.8"},
-        {"name": "Английский язык", "local_rank": "34/220", "score": "5.4"},
-    ]
-    selected_index = request.args.get("subject", "1")
-
+def get_selected_subject(subject: str | None):
     try:
-        selected_index = int(selected_index) - 1
+        selected_index = int(subject or "1") - 1
     except ValueError:
         selected_index = 0
 
-    if selected_index < 0 or selected_index >= len(subjects):
+    if selected_index < 0 or selected_index >= len(SUBJECTS):
         selected_index = 0
 
-    return render_template(
-        "success.html",
-        full_name=session.get("full_name", "Имя Фамилия"),
-        automats=automats,
-        subjects=subjects,
-        selected_subject=subjects[selected_index],
-        selected_index=selected_index,
-        preliminary_rank="12",
-        average_score="5.4",
+    return selected_index, SUBJECTS[selected_index]
+
+
+@app.get("/")
+async def index(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "full_name": "",
+            "group_number": "",
+            "direction": "",
+            "directions": DIRECTIONS,
+        },
     )
 
 
-if __name__ == "__main__":
-    app.run(debug=True)
+@app.post("/")
+async def submit_form(
+    request: Request,
+    full_name: str = Form(...),
+    group_number: str = Form(...),
+    direction: str = Form(...),
+):
+    request.session["full_name"] = full_name.strip()
+    request.session["group_number"] = group_number.strip()
+    request.session["direction"] = direction.strip()
+    return RedirectResponse(url="/success", status_code=303)
+
+
+@app.get("/success")
+async def success(request: Request, subject: str | None = None):
+    selected_index, selected_subject = get_selected_subject(subject)
+
+    return templates.TemplateResponse(
+        request,
+        "success.html",
+        {
+            "full_name": request.session.get("full_name", "Имя Фамилия"),
+            "automats": AUTOMATS,
+            "subjects": SUBJECTS,
+            "selected_subject": selected_subject,
+            "selected_index": selected_index,
+            "preliminary_rank": "12",
+            "average_score": "5.4",
+        },
+    )
+
+
+@app.get("/api/profile")
+async def profile_api(request: Request, subject: str | None = None):
+    selected_index, selected_subject = get_selected_subject(subject)
+
+    return {
+        "full_name": request.session.get("full_name", "Имя Фамилия"),
+        "group_number": request.session.get("group_number", ""),
+        "direction": request.session.get("direction", ""),
+        "preliminary_rank": "12",
+        "average_score": "5.4",
+        "automats": AUTOMATS,
+        "subjects": SUBJECTS,
+        "selected_index": selected_index,
+        "selected_subject": selected_subject,
+    }
