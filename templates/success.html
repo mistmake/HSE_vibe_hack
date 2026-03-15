@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Учебный профиль</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="success-body">
+    <main class="profile-shell">
+        <section class="profile-board">
+            <header class="profile-top">
+                <article class="mini-stat">
+                    <p class="mini-stat-label">Предварительный рейтинг</p>
+                    <div class="mini-stat-value">{{ preliminary_rank }}</div>
+                </article>
+
+                <section class="profile-name-block">
+                    <p class="hse-mark">Высшая школа экономики</p>
+                    <h1 class="profile-name">{{ full_name }}</h1>
+                    <p class="profile-subtitle">Индивидуальная учебная траектория</p>
+                </section>
+
+                <div class="side-column">
+                    <article class="mini-stat score-card">
+                        <p class="mini-stat-label">Средний балл</p>
+                        <div class="mini-stat-value">{{ average_score }}</div>
+                    </article>
+
+                    <article class="automats-card">
+                        <p class="panel-title">Автоматы</p>
+                        <ul class="automats-list">
+                            {% for automat in automats %}
+                                <li>{{ automat }}</li>
+                            {% endfor %}
+                        </ul>
+                    </article>
+                </div>
+            </header>
+
+            <section class="subjects-panel">
+                <div class="subjects-header">
+                    <p class="panel-title">Предметы</p>
+                    <a class="button ghost-button compact-button" href="{{ url_for('index') }}">Назад</a>
+                </div>
+
+                <div class="subjects-list">
+                    {% for subject in subjects %}
+                        <article class="subject-row">
+                            <div class="subject-main">
+                                <h2>{{ subject.name }}</h2>
+                                <p>Локальный рейтинг: {{ subject.local_rank }}</p>
+                            </div>
+                            <div class="subject-score">
+                                <span>Текущий балл</span>
+                                <strong>{{ subject.score }}</strong>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+            </section>
+        </section>
+    </main>
+</body>
+</html>

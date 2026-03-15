@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Анкета участника</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="simple-body">
+    <main class="page">
+        <section class="card">
+            <p class="eyebrow">Минимальный старт</p>
+            <h1 class="simple-title">Данные участника</h1>
+            <p class="subtitle">Простая форма для сайта на Flask</p>
+
+            <form method="post" class="form">
+                <label class="label" for="full_name">ФИО</label>
+                <input
+                    class="input"
+                    type="text"
+                    id="full_name"
+                    name="full_name"
+                    placeholder="Например: Иванов Иван Иванович"
+                    value="{{ full_name }}"
+                    required
+                >
+
+                <label class="label" for="group_number">Номер группы</label>
+                <input
+                    class="input"
+                    type="text"
+                    id="group_number"
+                    name="group_number"
+                    placeholder="Например: БПИ-241"
+                    value="{{ group_number }}"
+                    required
+                >
+
+                <label class="label" for="direction">Направление</label>
+                <select class="input" id="direction" name="direction" required>
+                    <option value="" disabled {% if not direction %}selected{% endif %}>Выберите направление</option>
+                    {% for item in directions %}
+                        <option value="{{ item }}" {% if direction == item %}selected{% endif %}>
+                            {{ item }}
+                        </option>
+                    {% endfor %}
+                </select>
+
+                <button class="button primary-button" type="submit">Сохранить</button>
+            </form>
+        </section>
+    </main>
+</body>
+</html>
