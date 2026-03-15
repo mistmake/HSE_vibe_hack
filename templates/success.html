@@ -7,70 +7,111 @@
     <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}">
 </head>
 <body class="success-body">
-    <main class="profile-shell">
-        <section class="profile-board">
-            <header class="profile-top">
-                <article class="mini-stat">
-                    <p class="mini-stat-label">Предварительный рейтинг</p>
-                    <div class="mini-stat-value">{{ preliminary_rank }}</div>
-                </article>
-
-                <section class="profile-name-block">
-                    <p class="hse-mark">Высшая школа экономики</p>
-                    <h1 class="profile-name">{{ full_name }}</h1>
-                    <p class="profile-subtitle">Индивидуальная учебная траектория</p>
-                </section>
-
-                <div class="side-column">
-                    <article class="mini-stat score-card">
-                        <p class="mini-stat-label">Средний балл</p>
-                        <div class="mini-stat-value">{{ average_score }}</div>
-                    </article>
-
-                    <article class="automats-card">
-                        <p class="panel-title">Автоматы</p>
-                        <ul class="automats-list">
-                            {% for automat in automats %}
-                                <li>{{ automat }}</li>
-                            {% endfor %}
-                        </ul>
-                    </article>
+    <main class="dashboard-shell">
+        <section class="dashboard-frame">
+            <header class="dashboard-header">
+                <div class="brand-block">
+                    <span class="brand-chip">HSE Profile</span>
+                    <h1 class="brand-title">{{ full_name }}</h1>
+                    <p class="brand-subtitle">Персональный академический обзор</p>
                 </div>
+
+                <a class="button ghost-button compact-button" href="{{ request.url_for('index') }}">Назад</a>
             </header>
 
-            <section class="subjects-panel">
-                <div class="subjects-header">
-                    <p class="panel-title">Предметы</p>
-                    <a class="button ghost-button compact-button" href="{{ request.url_for('index') }}">Назад</a>
-                </div>
-
-                <div class="subjects-tabs">
-                    {% for subject in subjects %}
-                        <a
-                            class="subject-tab {% if selected_index == loop.index0 %}subject-tab-active{% endif %}"
-                            href="{{ request.url_for('success') }}?subject={{ loop.index }}"
-                        >
-                            {{ subject.name }}
-                        </a>
-                    {% endfor %}
-                </div>
-
-                <article class="subject-detail-card">
-                    <div class="subject-detail-stat">
-                        <span>Локальный рейтинг</span>
-                        <strong>{{ selected_subject.local_rank }}</strong>
-                    </div>
-
-                    <div class="subject-detail-main">
-                        <p class="subject-detail-label">Предмет</p>
-                        <h2>{{ selected_subject.name }}</h2>
-                    </div>
-
-                    <div class="subject-detail-score">
-                        <span>Текущий балл</span>
-                        <strong>{{ selected_subject.score }}</strong>
-                    </div>
+            <section class="overview-grid">
+                <article class="overview-card">
+                    <span class="overview-label">Предварительный рейтинг</span>
+                    <strong class="overview-value">{{ preliminary_rank }}</strong>
                 </article>
+
+                <article class="overview-card overview-card-wide">
+                    <span class="overview-label">Статус профиля</span>
+                    <div class="status-line">
+                        <strong class="overview-inline-title">Данные собраны</strong>
+                        <span class="status-pill">Актуально</span>
+                    </div>
+                    <p class="overview-copy">
+                        Профиль уже выглядит как отдельный кабинет: метрики, предметы, автомат и текущие показатели.
+                    </p>
+                </article>
+
+                <article class="overview-card">
+                    <span class="overview-label">Средний балл</span>
+                    <strong class="overview-value">{{ average_score }}</strong>
+                </article>
+            </section>
+
+            <section class="content-grid">
+                <section class="subjects-card">
+                    <div class="section-head">
+                        <div>
+                            <p class="section-kicker">Навигация</p>
+                            <h2 class="section-title">Предметы</h2>
+                        </div>
+                    </div>
+
+                    <div class="subjects-tabs">
+                        {% for subject in subjects %}
+                            <a
+                                class="subject-tab {% if selected_index == loop.index0 %}subject-tab-active{% endif %}"
+                                href="{{ request.url_for('success') }}?subject={{ loop.index }}"
+                            >
+                                {{ subject.name }}
+                            </a>
+                        {% endfor %}
+                    </div>
+
+                    <article class="subject-focus-card">
+                        <div class="focus-stat">
+                            <span class="focus-label">Локальный рейтинг</span>
+                            <strong class="focus-value">{{ selected_subject.local_rank }}</strong>
+                        </div>
+
+                    <div class="focus-center">
+                        <span class="focus-label">Раздел</span>
+                        <h3 class="focus-title">Формула оценивания</h3>
+                    </div>
+
+                        <div class="focus-stat focus-stat-right">
+                            <span class="focus-label">Текущий балл</span>
+                            <strong class="focus-value">{{ selected_subject.score }}</strong>
+                        </div>
+                    </article>
+                </section>
+
+                <aside class="side-stack">
+                    <section class="automats-card">
+                        <div class="section-head">
+                            <div>
+                                <p class="section-kicker">Учебный трек</p>
+                                <h2 class="section-title">Автоматы</h2>
+                            </div>
+                        </div>
+
+                        <div class="chips-list">
+                            {% for automat in automats %}
+                                <span class="automat-chip">{{ automat }}</span>
+                            {% endfor %}
+                        </div>
+                    </section>
+
+                    <section class="summary-card">
+                        <p class="section-kicker">Сводка</p>
+                        <div class="summary-row">
+                            <span>Выбранный предмет</span>
+                            <strong>{{ selected_subject.name }}</strong>
+                        </div>
+                        <div class="summary-row">
+                            <span>Локальный рейтинг</span>
+                            <strong>{{ selected_subject.local_rank }}</strong>
+                        </div>
+                        <div class="summary-row">
+                            <span>Текущий балл</span>
+                            <strong>{{ selected_subject.score }}</strong>
+                        </div>
+                    </section>
+                </aside>
             </section>
         </section>
     </main>

@@ -19,6 +19,10 @@ DIRECTIONS = [
     "Менеджмент",
 ]
 
+COURSES = ["1 курс", "2 курс", "3 курс", "4 курс"]
+
+MODULES = ["1 модуль", "2 модуль", "3 модуль", "4 модуль"]
+
 AUTOMATS = [
     "Высшая математика",
     "Алгоритмы и структуры данных",
@@ -55,7 +59,11 @@ async def index(request: Request):
             "full_name": "",
             "group_number": "",
             "direction": "",
+            "course": "",
+            "current_module": "",
             "directions": DIRECTIONS,
+            "courses": COURSES,
+            "modules": MODULES,
         },
     )
 
@@ -66,10 +74,14 @@ async def submit_form(
     full_name: str = Form(...),
     group_number: str = Form(...),
     direction: str = Form(...),
+    course: str = Form(...),
+    current_module: str = Form(...),
 ):
     request.session["full_name"] = full_name.strip()
     request.session["group_number"] = group_number.strip()
     request.session["direction"] = direction.strip()
+    request.session["course"] = course.strip()
+    request.session["current_module"] = current_module.strip()
     return RedirectResponse(url="/success", status_code=303)
 
 
@@ -100,6 +112,8 @@ async def profile_api(request: Request, subject: str | None = None):
         "full_name": request.session.get("full_name", "Имя Фамилия"),
         "group_number": request.session.get("group_number", ""),
         "direction": request.session.get("direction", ""),
+        "course": request.session.get("course", ""),
+        "current_module": request.session.get("current_module", ""),
         "preliminary_rank": "12",
         "average_score": "5.4",
         "automats": AUTOMATS,

@@ -7,47 +7,96 @@
     <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}">
 </head>
 <body class="simple-body">
-    <main class="page">
-        <section class="card">
-            <p class="eyebrow">Минимальный старт</p>
-            <h1 class="simple-title">Данные участника</h1>
-            <p class="subtitle">Простая форма для сайта на FastAPI</p>
+    <main class="landing-shell">
+        <section class="landing-hero">
+            <div class="hero-badge">HSE Vibe 2026</div>
+            <h1 class="landing-title">Собери профиль участника в одном чистом интерфейсе</h1>
+            <p class="landing-text">
+                Быстрая анкета, понятный сценарий и отдельный экран профиля после сохранения.
+                Без лишних шагов и с нормальной визуальной подачей.
+            </p>
 
-            <form method="post" class="form">
-                <label class="label" for="full_name">ФИО</label>
-                <input
-                    class="input"
-                    type="text"
-                    id="full_name"
-                    name="full_name"
-                    placeholder="Например: Иванов Иван Иванович"
-                    value="{{ full_name }}"
-                    required
-                >
+            <div class="hero-metrics">
+                <article class="metric-card">
+                    <span class="metric-label">Формат</span>
+                    <strong>FastAPI</strong>
+                </article>
+                <article class="metric-card">
+                    <span class="metric-label">Сценарий</span>
+                    <strong>Форма -> профиль</strong>
+                </article>
+                <article class="metric-card">
+                    <span class="metric-label">Стиль</span>
+                    <strong>Чистый dashboard</strong>
+                </article>
+            </div>
+        </section>
 
-                <label class="label" for="group_number">Номер группы</label>
-                <input
-                    class="input"
-                    type="text"
-                    id="group_number"
-                    name="group_number"
-                    placeholder="Например: БПИ-241"
-                    value="{{ group_number }}"
-                    required
-                >
+        <section class="form-stage">
+            <div class="form-panel">
+                <div class="panel-topline">
+                    <span class="panel-kicker">Анкета</span>
+                    <span class="panel-dot"></span>
+                </div>
+                <h2 class="panel-title-xl">Данные участника</h2>
+                <p class="panel-subtitle">Заполни поля и перейди на отдельную страницу профиля.</p>
 
-                <label class="label" for="direction">Направление</label>
-                <select class="input" id="direction" name="direction" required>
-                    <option value="" disabled {% if not direction %}selected{% endif %}>Выберите направление</option>
-                    {% for item in directions %}
-                        <option value="{{ item }}" {% if direction == item %}selected{% endif %}>
-                            {{ item }}
-                        </option>
-                    {% endfor %}
-                </select>
+                <form method="post" class="form">
+                    <label class="label" for="full_name">ФИО</label>
+                    <input
+                        class="input"
+                        type="text"
+                        id="full_name"
+                        name="full_name"
+                        placeholder="Например: Иванов Иван Иванович"
+                        value="{{ full_name }}"
+                        required
+                    >
 
-                <button class="button primary-button" type="submit">Сохранить</button>
-            </form>
+                    <label class="label" for="group_number">Номер группы</label>
+                    <input
+                        class="input"
+                        type="text"
+                        id="group_number"
+                        name="group_number"
+                        placeholder="Например: БПИ-241"
+                        value="{{ group_number }}"
+                        required
+                    >
+
+                    <label class="label" for="course">Курс</label>
+                    <select class="input" id="course" name="course" required>
+                        <option value="" disabled {% if not course %}selected{% endif %}>Выберите курс</option>
+                        {% for item in courses %}
+                            <option value="{{ item }}" {% if course == item %}selected{% endif %}>
+                                {{ item }}
+                            </option>
+                        {% endfor %}
+                    </select>
+
+                    <label class="label" for="current_module">Текущий модуль</label>
+                    <select class="input" id="current_module" name="current_module" required>
+                        <option value="" disabled {% if not current_module %}selected{% endif %}>Выберите модуль</option>
+                        {% for item in modules %}
+                            <option value="{{ item }}" {% if current_module == item %}selected{% endif %}>
+                                {{ item }}
+                            </option>
+                        {% endfor %}
+                    </select>
+
+                    <label class="label" for="direction">Направление</label>
+                    <select class="input" id="direction" name="direction" required>
+                        <option value="" disabled {% if not direction %}selected{% endif %}>Выберите направление</option>
+                        {% for item in directions %}
+                            <option value="{{ item }}" {% if direction == item %}selected{% endif %}>
+                                {{ item }}
+                            </option>
+                        {% endfor %}
+                    </select>
+
+                    <button class="button primary-button wide-button" type="submit">Сохранить профиль</button>
+                </form>
+            </div>
         </section>
     </main>
 </body>
