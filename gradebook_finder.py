@@ -86,12 +86,39 @@ def normalize_program_code(program_code: str | None, group_name: str) -> str:
     raise ValueError("Не удалось определить программу. Передайте --program явно.")
 
 
-def normalize_group(group_name: str) -> str:
-    match = re.search(r"(\d{3}-\d)", group_name)
-    if not match:
-        raise ValueError("Не удалось извлечь группу. Ожидается формат вроде '257-1' или 'БПАД 257-1'.")
+def extract_inline_group_codes(text: str) -> list[str]:
+    upper = text.upper()
+    codes = []
+    seen = set()
+    blocked_digit_spans: list[tuple[int, int]] = []
 
-    return match.group(1)
+    def remember(code: str) -> None:
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+
+    for match in re.finditer(r"(?<!\d)(\d{3}-\d)(?!\d)", upper):
+        remember(match.group(0))
+
+    for match in re.finditer(r"(?:БЭАД|ЭАД|Э)\s*(25\d{1,2})(?!\d)", upper):
+        remember(f"Э{match.group(1)}")
+        blocked_digit_spans.append(match.span(1))
+
+    for match in re.finditer(r"(?<!\d)(25\d{1,2})(?![\d-])", upper):
+        span = match.span(1)
+        if any(span[0] < blocked_end and span[1] > blocked_start for blocked_start, blocked_end in blocked_digit_spans):
+            continue
+        remember(match.group(1))
+
+    return codes
+
+
+def normalize_group(group_name: str) -> str:
+    codes = extract_inline_group_codes(group_name)
+    if not codes:
+        raise ValueError("Не удалось извлечь группу. Поддерживаются форматы вроде '257-1', 'БПАД 257-1', 'БПМИ256' или '256'.")
+
+    return codes[0]
 
 
 def normalize_subject_key(subject_name: str) -> str:
@@ -207,7 +234,16 @@ def find_exact_group_sheet(raw_text: str, group_code: str) -> str | None:
 
 
 def extract_group_codes(raw_text: str) -> list[str]:
-    return sorted(set(re.findall(r"\b\d{3}-\d\b", raw_text)))
+    codes = []
+    seen = set()
+
+    for line in raw_text.splitlines():
+        for code in extract_inline_group_codes(line):
+            if code not in seen:
+                seen.add(code)
+                codes.append(code)
+
+    return sorted(codes)
 
 
 def extract_exact_group_sheets(raw_text: str) -> dict[str, str]:
@@ -222,7 +258,7 @@ def extract_exact_group_sheets(raw_text: str) -> dict[str, str]:
             continue
 
         first_cell = stripped[1:].split("||", 1)[0]
-        groups = re.findall(r"\b\d{3}-\d\b", first_cell)
+        groups = extract_inline_group_codes(first_cell)
         if not groups:
             continue
 
@@ -249,9 +285,10 @@ def extract_bucket_group_sheets(raw_text: str) -> dict[str, str]:
             continue
 
         for url, label in labels_and_urls:
-            bucket_match = re.search(r"\b(25\d)\b", label)
-            if bucket_match:
-                matches[bucket_match.group(1)] = url.rstrip(").,>")
+            for code in extract_inline_group_codes(label):
+                if "-" in code:
+                    continue
+                matches[code] = url.rstrip(").,>")
 
     return matches
 
