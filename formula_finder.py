@@ -37,8 +37,365 @@ def clean_formula_line(line: str) -> str:
     cleaned = re.sub(r"<[^>]+>", "", cleaned)
     cleaned = re.sub(r"\[([^\s\]]+)\s+([^\]]+)\]", r"\2", cleaned)
     cleaned = html.unescape(cleaned)
+    cleaned = re.sub(r"^[*#:;]+\s*", "", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+
+def normalize_formula_signature(text: str) -> str:
+    cleaned = clean_formula_line(text)
+    cleaned = cleaned.upper()
+    cleaned = cleaned.replace("'", "")
+    cleaned = cleaned.replace("_", "")
+    cleaned = re.sub(r"[^A-Z0-9=]+", "", cleaned)
+    return cleaned
+
+
+def looks_like_formula_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped or "=" not in stripped:
+        return False
+    if re.match(r"^=+.*=+$", stripped):
+        return False
+    if stripped.startswith(("{|", "|}", "|-", "!", "|", "||")):
+        return False
+
+    cleaned = clean_formula_line(stripped)
+    lowered = cleaned.lower()
+    if any(marker in lowered for marker in ("http://", "https://", "docs.google.com", "telegram", "classroom")):
+        return False
+
+    if re.search(r"\b([A-Za-z][A-Za-z0-9_']{0,25})\s*=", cleaned):
+        return True
+
+    return "round(" in lowered and any(marker in lowered for marker in ("final course grade", "grade for the"))
+
+
+def matches_any_token(signature: str, tokens: tuple[str, ...]) -> bool:
+    return any(token in signature for token in tokens)
+
+
+def heading_level(line: str) -> int | None:
+    stripped = line.strip()
+    match = re.match(r"^(=+).*(=+)$", stripped)
+    if not match or len(match.group(1)) != len(match.group(2)):
+        return None
+    return len(match.group(1))
+
+
+def extract_formula_variable(line: str) -> str:
+    cleaned = clean_formula_line(line)
+    segments = [cleaned]
+    if ":" in cleaned:
+        segments = list(reversed([segment.strip() for segment in cleaned.split(":")]))
+
+    invalid_variables = {
+        "GRADE",
+        "GRADING",
+        "SYSTEM",
+        "SEMESTER",
+        "MODULE",
+        "FINALGRADE",
+        "COURSEGRADE",
+    }
+    for segment in segments:
+        match = re.search(r"\b([A-Za-z][A-Za-z0-9_']{0,40})\s*=", segment)
+        if not match:
+            continue
+        variable = normalize_formula_signature(match.group(1))
+        if variable and variable not in invalid_variables:
+            return variable
+    return ""
+
+
+def extract_rhs_expression(line: str) -> str:
+    cleaned = clean_formula_line(line)
+    parts = cleaned.rsplit("=", 1)
+    if len(parts) != 2:
+        return ""
+    return parts[1].strip()
+
+
+def normalize_identifier(value: str) -> str:
+    cleaned = clean_formula_line(value)
+    cleaned = cleaned.replace("'", "_prime")
+    cleaned = re.sub(r"[(){}\[\]]+", "_", cleaned)
+    cleaned = cleaned.replace("&", "_")
+    cleaned = cleaned.replace("/", "_")
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", cleaned)
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    if not cleaned:
+        return ""
+    if cleaned[0].isdigit():
+        cleaned = f"v_{cleaned}"
+    return cleaned
+
+
+def dedupe_strings(values: list[str]) -> list[str]:
+    unique_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = clean_formula_line(value)
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        unique_values.append(cleaned)
+    return unique_values
+
+
+def prepare_formula_context_for_llm(raw_text: str) -> str:
+    section = extract_formula_section(raw_text)
+    cleaned_lines: list[str] = []
+    for raw_line in section.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith(("{|", "|}", "|-", "!", "|", "||")):
+            continue
+        cleaned = clean_formula_line(raw_line)
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if any(
+            marker in lowered
+            for marker in ("telegram", "classroom", "docs.google.com", "drive.google.com", "zoom")
+        ) and "=" not in cleaned:
+            continue
+        cleaned_lines.append(cleaned)
+
+    excerpt = "\n".join(cleaned_lines).strip()
+    if excerpt:
+        return excerpt[:16000]
+
+    raw_excerpt_lines = []
+    for raw_line in raw_text.splitlines():
+        cleaned = clean_formula_line(raw_line)
+        if cleaned:
+            raw_excerpt_lines.append(cleaned)
+    return "\n".join(raw_excerpt_lines)[:16000]
+
+
+def normalize_formula_target(raw_target: dict | None) -> dict:
+    raw_target = raw_target if isinstance(raw_target, dict) else {}
+    variable = clean_formula_line(raw_target.get("variable", ""))
+    expression = clean_formula_line(raw_target.get("expression", "")) or extract_rhs_expression(
+        raw_target.get("full_formula", "")
+    )
+    full_formula = clean_formula_line(raw_target.get("full_formula", ""))
+
+    if full_formula and not variable:
+        variable = extract_formula_variable(full_formula)
+    if variable and expression and not full_formula:
+        full_formula = f"{variable} = {expression}"
+
+    alias = normalize_identifier(
+        raw_target.get("alias", "")
+        or raw_target.get("normalized_variable", "")
+        or variable
+    )
+    return {
+        "variable": variable,
+        "alias": alias,
+        "expression": expression,
+        "full_formula": full_formula,
+        "label": clean_formula_line(raw_target.get("label", "")),
+        "module_scope": clean_formula_line(raw_target.get("module_scope", "")),
+        "description": clean_formula_line(raw_target.get("description", "")),
+    }
+
+
+def normalize_formula_step(raw_step: dict) -> dict | None:
+    if not isinstance(raw_step, dict):
+        return None
+
+    variable = clean_formula_line(raw_step.get("variable", ""))
+    expression = clean_formula_line(raw_step.get("expression", "")) or clean_formula_line(
+        raw_step.get("rhs_expression", "")
+    )
+    full_formula = clean_formula_line(raw_step.get("full_formula", "")) or clean_formula_line(
+        raw_step.get("formula", "")
+    )
+
+    if full_formula and not variable:
+        variable = extract_formula_variable(full_formula)
+    if full_formula and not expression:
+        expression = extract_rhs_expression(full_formula)
+    if variable and expression and not full_formula:
+        full_formula = f"{variable} = {expression}"
+
+    if not variable and not full_formula:
+        return None
+
+    depends_on = dedupe_strings(
+        [
+            item
+            for item in raw_step.get("depends_on", [])
+            if isinstance(item, str)
+        ]
+    )
+    kind = clean_formula_line(raw_step.get("kind", "")).lower()
+    if kind not in {"input", "derived", "target", "final"}:
+        kind = "derived"
+
+    return {
+        "variable": variable,
+        "alias": normalize_identifier(
+            raw_step.get("alias", "")
+            or raw_step.get("normalized_variable", "")
+            or variable
+        ),
+        "expression": expression,
+        "full_formula": full_formula,
+        "normalized_expression": clean_formula_line(raw_step.get("normalized_expression", "")),
+        "depends_on": depends_on,
+        "kind": kind,
+        "module_scope": clean_formula_line(raw_step.get("module_scope", "")),
+        "description": clean_formula_line(raw_step.get("description", "")),
+    }
+
+
+def normalize_input_variable(raw_item: dict | str) -> dict | None:
+    if isinstance(raw_item, str):
+        variable = clean_formula_line(raw_item)
+        if not variable:
+            return None
+        return {
+            "variable": variable,
+            "alias": normalize_identifier(variable),
+            "label": variable,
+            "description": "",
+            "expected_range": "",
+        }
+
+    if not isinstance(raw_item, dict):
+        return None
+
+    variable = clean_formula_line(raw_item.get("variable", "")) or clean_formula_line(raw_item.get("symbol", ""))
+    if not variable:
+        return None
+
+    return {
+        "variable": variable,
+        "alias": normalize_identifier(
+            raw_item.get("alias", "")
+            or raw_item.get("normalized_variable", "")
+            or variable
+        ),
+        "label": clean_formula_line(raw_item.get("label", "")) or variable,
+        "description": clean_formula_line(raw_item.get("description", "")),
+        "expected_range": clean_formula_line(raw_item.get("expected_range", "")),
+    }
+
+
+def apply_aliases(text: str, alias_map: dict[str, str]) -> str:
+    normalized = clean_formula_line(text)
+    for original in sorted(alias_map, key=len, reverse=True):
+        alias = alias_map[original]
+        if original and alias:
+            normalized = normalized.replace(original, alias)
+    return normalized
+
+
+def finalize_formula_payload(
+    *,
+    subject_name: str,
+    page_title: str,
+    page_url: str,
+    source_label: str,
+    is_exact: bool,
+    reason: str,
+    used_gpt: bool,
+    formula: str,
+    formula_lines: list[str],
+    selected_target: dict | None = None,
+    final_target: dict | None = None,
+    formula_chain: list[dict] | None = None,
+    input_variables: list[dict] | None = None,
+) -> dict:
+    selected_target_data = normalize_formula_target(selected_target)
+    final_target_data = normalize_formula_target(final_target)
+
+    normalized_chain = [
+        step
+        for step in (normalize_formula_step(item) for item in (formula_chain or []))
+        if step
+    ]
+    normalized_inputs = [
+        item
+        for item in (normalize_input_variable(raw_item) for raw_item in (input_variables or []))
+        if item
+    ]
+
+    derived_variables = {step["variable"] for step in normalized_chain if step["variable"]}
+    known_inputs = {item["variable"] for item in normalized_inputs}
+    for step in normalized_chain:
+        for dependency in step["depends_on"]:
+            if dependency not in derived_variables and dependency not in known_inputs:
+                normalized_inputs.append(
+                    {
+                        "variable": dependency,
+                        "alias": normalize_identifier(dependency),
+                        "label": dependency,
+                        "description": "",
+                        "expected_range": "",
+                    }
+                )
+                known_inputs.add(dependency)
+
+    alias_map = {
+        item["variable"]: item["alias"]
+        for item in normalized_inputs
+        if item["variable"] and item["alias"]
+    }
+    alias_map.update(
+        {
+            step["variable"]: step["alias"]
+            for step in normalized_chain
+            if step["variable"] and step["alias"]
+        }
+    )
+    for target in (selected_target_data, final_target_data):
+        if target["variable"] and target["alias"]:
+            alias_map[target["variable"]] = target["alias"]
+
+    for step in normalized_chain:
+        if not step["normalized_expression"]:
+            expression_source = step["expression"] or step["full_formula"]
+            step["normalized_expression"] = apply_aliases(expression_source, alias_map)
+
+    if selected_target_data["full_formula"] and not selected_target_data["expression"]:
+        selected_target_data["expression"] = extract_rhs_expression(selected_target_data["full_formula"])
+    if final_target_data["full_formula"] and not final_target_data["expression"]:
+        final_target_data["expression"] = extract_rhs_expression(final_target_data["full_formula"])
+
+    normalized_formula_lines = dedupe_strings(formula_lines)
+    if not normalized_formula_lines and normalized_chain:
+        normalized_formula_lines = dedupe_strings(
+            [step["full_formula"] or step["expression"] for step in normalized_chain if step["full_formula"] or step["expression"]]
+        )
+    if not normalized_formula_lines and selected_target_data["full_formula"]:
+        normalized_formula_lines = [selected_target_data["full_formula"]]
+    if not normalized_formula_lines and final_target_data["full_formula"]:
+        normalized_formula_lines = [final_target_data["full_formula"]]
+
+    resolved_formula = clean_formula_line(formula)
+    if not resolved_formula and normalized_formula_lines:
+        resolved_formula = "\n".join(normalized_formula_lines)
+
+    return {
+        "subject": subject_name,
+        "page_title": page_title,
+        "page_url": page_url,
+        "formula": resolved_formula,
+        "formula_lines": normalized_formula_lines,
+        "selected_target": selected_target_data,
+        "final_target": final_target_data,
+        "formula_chain": normalized_chain,
+        "input_variables": normalized_inputs,
+        "calculation_ready": bool(normalized_chain and (selected_target_data["variable"] or final_target_data["variable"])),
+        "source_label": source_label,
+        "is_exact": is_exact,
+        "reason": clean_formula_line(reason),
+        "used_gpt": used_gpt,
+    }
 
 
 def locate_subject_page(subject_name: str, program_code: str) -> dict:
@@ -91,23 +448,38 @@ def locate_subject_page(subject_name: str, program_code: str) -> dict:
 
 def extract_formula_section(raw_text: str) -> str:
     lines = raw_text.splitlines()
-    preferred_markers = ("grading system", "grading", "formula", "grades")
+    preferred_markers = (
+        "grading system",
+        "assessment and grading",
+        "grading",
+        "assessment",
+        "evaluation",
+        "formula",
+        "grades",
+        "оцен",
+        "формул",
+    )
 
-    for marker in preferred_markers:
+    marker_keys = tuple(normalize_subject_key(marker) for marker in preferred_markers)
+
+    for marker, marker_key in zip(preferred_markers, marker_keys):
         collected: list[str] = []
         capture = False
+        marker_level: int | None = None
 
         for line in lines:
             stripped = line.strip()
-            is_heading = bool(re.match(r"^=+.*=+$", stripped))
+            current_level = heading_level(stripped)
+            is_heading = current_level is not None
             heading_key = normalize_subject_key(stripped)
 
-            if is_heading and marker in heading_key:
+            if is_heading and marker_key and marker_key in heading_key:
                 capture = True
+                marker_level = current_level
                 collected.append(line)
                 continue
 
-            if capture and is_heading:
+            if capture and is_heading and marker_level is not None and current_level <= marker_level:
                 break
 
             if capture:
@@ -118,8 +490,14 @@ def extract_formula_section(raw_text: str) -> str:
 
     relevant = []
     for line in lines:
-        lowered = line.lower()
-        if any(marker in lowered for marker in ("cum", "exam", "final", "grade", "formula", "=")):
+        lowered = clean_formula_line(line).lower()
+        stripped = line.strip()
+        if stripped.startswith(("{|", "|}", "|-", "!", "|", "||")):
+            continue
+        if looks_like_formula_line(line) or any(
+            marker in lowered
+            for marker in ("cum", "exam", "final", "grade", "formula", "interim", "round(", "bonus", "colloq")
+        ):
             relevant.append(line)
 
     if relevant:
@@ -130,25 +508,103 @@ def extract_formula_section(raw_text: str) -> str:
 
 def fallback_formula_lines(raw_text: str, module_number: int | None) -> list[str]:
     relevant_text = extract_formula_section(raw_text)
-    lines = []
+    formula_entries: list[tuple[str, str, str]] = []
     for raw_line in relevant_text.splitlines():
         line = raw_line.strip()
-        if not line or "=" not in line:
+        if not line:
             continue
 
-        lowered = line.lower()
+        lowered = clean_formula_line(line).lower()
         if any(marker in lowered for marker in ("classroom", "telegram", "google.com", "links", "tg:")):
             continue
 
-        compact = re.sub(r"\s+", "", line).upper()
-        if module_number in (1, 2) and any(token in compact for token in ("CUM<SUB>1</SUB>", "G<SUB>1</SUB>", "CUM1", "G1", "FINAL<SUB>1</SUB>", "M1")):
-            lines.append(clean_formula_line(line))
-        elif module_number in (3, 4) and any(token in compact for token in ("CUM<SUB>2</SUB>", "G<SUB>2</SUB>", "CUM2", "G2", "FINAL<SUB>2</SUB>", "M3", "M4")):
-            lines.append(clean_formula_line(line))
-        elif module_number is None and any(token in compact for token in ("CUM", "G", "FINAL", "M1", "M2", "M3", "M4")):
-            lines.append(clean_formula_line(line))
+        if looks_like_formula_line(line):
+            cleaned = clean_formula_line(line)
+            formula_entries.append((cleaned, normalize_formula_signature(cleaned), extract_formula_variable(cleaned)))
+            continue
 
-    return lines[:6]
+    if not formula_entries:
+        return []
+
+    early_primary_tokens = (
+        "CUM1",
+        "G1",
+        "FINAL1",
+        "MID1",
+        "EXAM1",
+        "INTERIM1",
+        "C1",
+        "I1",
+    )
+    early_secondary_tokens = (
+        "GCUMULATIVE",
+        "HWA",
+    )
+    late_primary_tokens = (
+        "CUM2",
+        "G2",
+        "FINAL2",
+        "GFINAL",
+        "FINAL",
+        "MID2",
+        "EXAM2",
+        "INTERIM2",
+        "C2",
+        "I2",
+        "HWB",
+        "HWTESTB",
+        "COLLOQ",
+        "BONUS",
+        "F",
+    )
+    late_secondary_tokens = (
+        "GCUMULATIVE",
+    )
+    selected: list[str] = []
+    seen: set[str] = set()
+
+    def add_matching(tokens: tuple[str, ...], *, use_signature: bool = False) -> None:
+        for cleaned, signature, variable in formula_entries:
+            if cleaned in seen:
+                continue
+            lowered_cleaned = cleaned.lower()
+            if not variable and module_number in (1, 2) and any(
+                marker in lowered_cleaned for marker in ("final course grade", "final grade")
+            ):
+                continue
+            if variable and not use_signature:
+                matched = variable in tokens
+            else:
+                matched = matches_any_token(signature, tokens)
+            if matched:
+                selected.append(cleaned)
+                seen.add(cleaned)
+
+    if module_number in (1, 2):
+        add_matching(early_primary_tokens)
+        if len(selected) < 2:
+            add_matching(early_secondary_tokens)
+    elif module_number in (3, 4):
+        add_matching(late_primary_tokens)
+        if len(selected) < 2:
+            add_matching(late_secondary_tokens)
+    else:
+        for cleaned, _signature, _variable in formula_entries:
+            if cleaned in seen:
+                continue
+            selected.append(cleaned)
+            seen.add(cleaned)
+
+    if len(selected) < 2:
+        for cleaned, _signature, _variable in formula_entries:
+            if cleaned in seen:
+                continue
+            selected.append(cleaned)
+            seen.add(cleaned)
+            if len(selected) >= 6:
+                break
+
+    return selected[:8]
 
 
 def extract_formula_with_llm(
@@ -162,20 +618,63 @@ def extract_formula_with_llm(
     if not has_openai_api_key():
         return None
 
+    context_excerpt = prepare_formula_context_for_llm(raw_text)
     prompt = {
         "subject_name": subject_name,
         "page_title": page_title,
+        "page_url": page_url,
         "current_module": module_number,
-        "task": (
-            "Extract only the grading formula from this wiki page. "
-            "If there are separate formulas for modules 1-2 and 3-4, choose the one relevant to current_module. "
-            "Return only formula lines, not long explanations. "
-            "If no exact formula exists, return formula=null."
-        ),
-        "page_excerpt": extract_formula_section(raw_text),
+        "task": [
+            "Extract the grading formulas from this HSE FKN wiki page.",
+            "Use GPT as the main parser and prefer exact equations from the page.",
+            "Choose the formula track relevant to current_module. Modules 1-2 mean the first-semester track, modules 3-4 mean the second-semester or final-course track.",
+            "Return a machine-friendly JSON payload so another script can calculate the grade from student inputs.",
+            "Do not invent formulas. If the page does not contain enough information, return formula=null and empty arrays.",
+        ],
+        "page_excerpt": context_excerpt,
         "return_json_schema": {
             "formula": "string|null",
             "formula_lines": ["string"],
+            "selected_target": {
+                "variable": "string",
+                "alias": "string",
+                "expression": "string",
+                "full_formula": "string",
+                "label": "string",
+                "module_scope": "string",
+                "description": "string",
+            },
+            "final_target": {
+                "variable": "string",
+                "alias": "string",
+                "expression": "string",
+                "full_formula": "string",
+                "label": "string",
+                "module_scope": "string",
+                "description": "string",
+            },
+            "formula_chain": [
+                {
+                    "variable": "string",
+                    "alias": "string",
+                    "expression": "string",
+                    "full_formula": "string",
+                    "normalized_expression": "string",
+                    "depends_on": ["string"],
+                    "kind": "input|derived|target|final",
+                    "module_scope": "string",
+                    "description": "string",
+                }
+            ],
+            "input_variables": [
+                {
+                    "variable": "string",
+                    "alias": "string",
+                    "label": "string",
+                    "description": "string",
+                    "expected_range": "string",
+                }
+            ],
             "reason": "short string",
             "is_exact": "boolean",
         },
@@ -189,29 +688,30 @@ def extract_formula_with_llm(
     except Exception:
         return None
 
-    formula_lines = [
-        clean_formula_line(line)
-        for line in result.get("formula_lines", [])
-        if isinstance(line, str) and line.strip()
-    ]
-    formula = clean_formula_line(result.get("formula", "")) if result.get("formula") else ""
-    if not formula and formula_lines:
-        formula = "\n".join(formula_lines)
+    normalized_result = finalize_formula_payload(
+        subject_name=subject_name,
+        page_title=page_title,
+        page_url=page_url,
+        source_label="Wiki ФКН (GPT parser)",
+        is_exact=bool(result.get("is_exact", True)),
+        reason=result.get("reason", ""),
+        used_gpt=True,
+        formula=result.get("formula", "") or "",
+        formula_lines=[
+            line
+            for line in result.get("formula_lines", [])
+            if isinstance(line, str) and line.strip()
+        ],
+        selected_target=result.get("selected_target"),
+        final_target=result.get("final_target"),
+        formula_chain=result.get("formula_chain"),
+        input_variables=result.get("input_variables"),
+    )
 
-    if not formula:
+    if not normalized_result["formula"] and not normalized_result["formula_chain"]:
         return None
 
-    return {
-        "subject": subject_name,
-        "page_title": page_title,
-        "page_url": page_url,
-        "formula": formula,
-        "formula_lines": formula_lines,
-        "source_label": "Wiki ФКН (LLM extract)",
-        "is_exact": bool(result.get("is_exact", True)),
-        "reason": result.get("reason", ""),
-        "used_gpt": True,
-    }
+    return normalized_result
 
 
 def find_subject_formula(
@@ -232,17 +732,17 @@ def find_subject_formula(
     module_number = parse_module_number(module_value)
 
     if not raw_text:
-        return {
-            "subject": subject_name,
-            "page_title": page_title,
-            "page_url": page_url,
-            "formula": "Не удалось загрузить страницу предмета с wiki ФКН.",
-            "formula_lines": [],
-            "source_label": "Wiki ФКН",
-            "is_exact": False,
-            "reason": "Пустой ответ от wiki.",
-            "used_gpt": False,
-        }
+        return finalize_formula_payload(
+            subject_name=subject_name,
+            page_title=page_title,
+            page_url=page_url,
+            source_label="Wiki ФКН",
+            is_exact=False,
+            reason="Пустой ответ от wiki.",
+            used_gpt=False,
+            formula="Не удалось загрузить страницу предмета с wiki ФКН.",
+            formula_lines=[],
+        )
 
     if use_gpt:
         llm_result = extract_formula_with_llm(
@@ -257,29 +757,29 @@ def find_subject_formula(
 
     fallback_lines = fallback_formula_lines(raw_text, module_number)
     if fallback_lines:
-        return {
-            "subject": subject_name,
-            "page_title": page_title,
-            "page_url": page_url,
-            "formula": "\n".join(fallback_lines),
-            "formula_lines": fallback_lines,
-            "source_label": "Wiki ФКН (regex fallback)",
-            "is_exact": False,
-            "reason": "LLM недоступна или не вернула формулу, использован текстовый fallback.",
-            "used_gpt": False,
-        }
+        return finalize_formula_payload(
+            subject_name=subject_name,
+            page_title=page_title,
+            page_url=page_url,
+            source_label="Wiki ФКН (fallback parser)",
+            is_exact=False,
+            reason="GPT parser недоступен или не вернул пригодную структуру, использован резервный текстовый разбор.",
+            used_gpt=False,
+            formula="\n".join(fallback_lines),
+            formula_lines=fallback_lines,
+        )
 
-    return {
-        "subject": subject_name,
-        "page_title": page_title,
-        "page_url": page_url,
-        "formula": "Формула оценивания на открытой wiki-странице не найдена.",
-        "formula_lines": [],
-        "source_label": "Wiki ФКН",
-        "is_exact": False,
-        "reason": "На странице не удалось извлечь формулу ни через LLM, ни через fallback.",
-        "used_gpt": False,
-    }
+    return finalize_formula_payload(
+        subject_name=subject_name,
+        page_title=page_title,
+        page_url=page_url,
+        source_label="Wiki ФКН",
+        is_exact=False,
+        reason="На странице не удалось извлечь формулу ни через GPT parser, ни через fallback.",
+        used_gpt=False,
+        formula="Формула оценивания на открытой wiki-странице не найдена.",
+        formula_lines=[],
+    )
 
 
 def main() -> None:

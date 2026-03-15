@@ -125,6 +125,10 @@ def normalize_subject_key(subject_name: str) -> str:
     return re.sub(r"[^a-zA-Zа-яА-Я0-9]+", " ", subject_name.lower()).strip()
 
 
+def strip_html_comments(raw_text: str) -> str:
+    return re.sub(r"<!--.*?-->", "", raw_text, flags=re.S)
+
+
 @lru_cache(maxsize=64)
 def fetch_wiki_raw(title: str) -> str:
     raw_url = f"{WIKI_BASE_URL}/index.php?{urllib.parse.urlencode({'title': title, 'action': 'raw'})}"
@@ -234,6 +238,7 @@ def find_exact_group_sheet(raw_text: str, group_code: str) -> str | None:
 
 
 def extract_group_codes(raw_text: str) -> list[str]:
+    raw_text = strip_html_comments(raw_text)
     codes = []
     seen = set()
 
@@ -247,6 +252,7 @@ def extract_group_codes(raw_text: str) -> list[str]:
 
 
 def extract_exact_group_sheets(raw_text: str) -> dict[str, str]:
+    raw_text = strip_html_comments(raw_text)
     matches: dict[str, str] = {}
 
     for line in raw_text.splitlines():
@@ -271,6 +277,7 @@ def extract_exact_group_sheets(raw_text: str) -> dict[str, str]:
 
 
 def extract_bucket_group_sheets(raw_text: str) -> dict[str, str]:
+    raw_text = strip_html_comments(raw_text)
     matches: dict[str, str] = {}
 
     for line in raw_text.splitlines():
@@ -294,6 +301,7 @@ def extract_bucket_group_sheets(raw_text: str) -> dict[str, str]:
 
 
 def find_shared_sheet(raw_text: str) -> tuple[str | None, str]:
+    raw_text = strip_html_comments(raw_text)
     lines = raw_text.splitlines()
     positive_markers = (
         "results",
@@ -306,7 +314,16 @@ def find_shared_sheet(raw_text: str) -> tuple[str | None, str]:
         "performance",
         "the table",
     )
-    negative_markers = ("telegram", "classroom", "register", "interview", "itinerary")
+    negative_markers = (
+        "telegram",
+        "classroom",
+        "register",
+        "interview",
+        "itinerary",
+        "consultation",
+        "consultations",
+        "консультац",
+    )
 
     for index, line in enumerate(lines):
         if "docs.google.com/spreadsheets" not in line:

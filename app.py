@@ -587,9 +587,16 @@ def enrich_subject_formula(subject_data: dict, direction_code: str, module_value
         return enriched
 
     enriched["formula"] = formula_result["formula"]
+    enriched["formula_lines"] = formula_result.get("formula_lines", [])
     enriched["formula_source_url"] = formula_result["page_url"]
     enriched["formula_source_label"] = formula_result["source_label"]
     enriched["formula_is_exact"] = formula_result["is_exact"]
+    enriched["formula_used_gpt"] = formula_result.get("used_gpt", False)
+    enriched["formula_selected_target"] = formula_result.get("selected_target", {})
+    enriched["formula_final_target"] = formula_result.get("final_target", {})
+    enriched["formula_chain"] = formula_result.get("formula_chain", [])
+    enriched["formula_input_variables"] = formula_result.get("input_variables", [])
+    enriched["formula_calculation_ready"] = formula_result.get("calculation_ready", False)
     return enriched
 
 
@@ -680,7 +687,7 @@ async def subject_formula_api(
     subject: str = Query(..., description="Название предмета, например 'Calculus 1'"),
     direction: str | None = Query(None, description="Код программы, например PAD / PI / PMI"),
     current_module: str | None = Query(None, description="Текущий модуль, например '3 модуль'"),
-    use_gpt: bool = Query(True, description="Использовать GPT API для извлечения формулы"),
+    use_gpt: bool = Query(True, description="Использовать GPT API как основной парсер формулы"),
 ):
     direction_code = (direction or request.session.get("direction", "PI")).strip().upper()
     module_value = (current_module or request.session.get("current_module", "1 модуль")).strip()
@@ -707,6 +714,12 @@ async def subject_formula_api(
         "formula_source_label": formula_result["source_label"],
         "formula_is_exact": formula_result["is_exact"],
         "used_gpt": formula_result["used_gpt"],
+        "selected_target": formula_result.get("selected_target", {}),
+        "final_target": formula_result.get("final_target", {}),
+        "formula_chain": formula_result.get("formula_chain", []),
+        "input_variables": formula_result.get("input_variables", []),
+        "calculation_ready": formula_result.get("calculation_ready", False),
+        "reason": formula_result.get("reason", ""),
     }
 
 
