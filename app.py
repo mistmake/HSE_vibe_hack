@@ -4,11 +4,13 @@ import time
 import urllib.request
 from functools import lru_cache
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
+
+from gradebook_finder import DEFAULT_ACADEMIC_YEAR, find_subject_gradebook
 
 
 app = FastAPI(title="HSE Vibe Hack")
@@ -662,3 +664,33 @@ async def profile_api(request: Request, subject: str | None = None):
         "selected_index": selected_index,
         "selected_subject": selected_subject,
     }
+
+
+@app.get("/api/gradebooks/subject")
+async def subject_gradebook_api(
+    request: Request,
+    subject: str = Query(..., description="Название предмета, например 'English' или 'Calculus 1'"),
+    group: str = Query(..., description="Группа в формате 'БПАД 257-1' или '257-1'"),
+    program: str | None = Query(None, description="Код программы, например PAD / PI / PMI"),
+    academic_year: str = Query(DEFAULT_ACADEMIC_YEAR, description="Учебный год"),
+    use_gpt: bool = Query(True, description="Использовать GPT API как fallback для сложных страниц"),
+):
+    resolved_program = (program or request.session.get("direction", "")).strip() or None
+
+    try:
+        result = find_subject_gradebook(
+            subject_name=subject,
+            group_name=group,
+            program_code=resolved_program,
+            academic_year=academic_year,
+            use_gpt=use_gpt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось получить ведомость из wiki: {exc}") from exc
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Ведомость для этого предмета и группы не найдена")
+
+    return result

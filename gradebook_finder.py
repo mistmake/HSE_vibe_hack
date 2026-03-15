@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 from collections import defaultdict
@@ -92,14 +93,21 @@ def normalize_group(group_name: str) -> str:
     return match.group(1)
 
 
+def normalize_subject_key(subject_name: str) -> str:
+    return re.sub(r"[^a-zA-Zа-яА-Я0-9]+", " ", subject_name.lower()).strip()
+
+
 @lru_cache(maxsize=64)
 def fetch_wiki_raw(title: str) -> str:
     raw_url = f"{WIKI_BASE_URL}/index.php?{urllib.parse.urlencode({'title': title, 'action': 'raw'})}"
-    try:
-        with urllib.request.urlopen(raw_url, timeout=30) as response:
-            return response.read().decode("utf-8", errors="ignore")
-    except Exception:
-        return ""
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(raw_url, timeout=30) as response:
+                return response.read().decode("utf-8", errors="ignore")
+        except Exception:
+            time.sleep(0.25 * (attempt + 1))
+
+    return ""
 
 
 def extract_program_section(hub_raw: str, section_id: str) -> str:
@@ -455,6 +463,60 @@ def find_group_gradebooks(
         "academic_year": academic_year,
         "used_gpt": bool(use_gpt and os.getenv("OPENAI_API_KEY")),
         "matches": [asdict(match) for match in matches],
+    }
+
+
+def find_subject_gradebook(
+    subject_name: str,
+    group_name: str,
+    program_code: str | None = None,
+    academic_year: str = DEFAULT_ACADEMIC_YEAR,
+    use_gpt: bool = True,
+) -> dict | None:
+    result = find_group_gradebooks(
+        group_name=group_name,
+        program_code=program_code,
+        academic_year=academic_year,
+        use_gpt=use_gpt,
+    )
+
+    lookup = normalize_subject_key(subject_name)
+    exact_matches = []
+    partial_matches = []
+
+    for match in result["matches"]:
+        subject_candidates = [
+            normalize_subject_key(match["subject_name"]),
+            normalize_subject_key(match["subject_page_title"]),
+        ]
+
+        if lookup in subject_candidates:
+            exact_matches.append(match)
+            continue
+
+        if any(lookup and lookup in candidate for candidate in subject_candidates):
+            partial_matches.append(match)
+
+    ranked_matches = exact_matches or partial_matches
+    if not ranked_matches:
+        return None
+
+    ranked_matches.sort(
+        key=lambda match: (
+            0 if match["match_type"] == "group_specific" else 1,
+            len(match["subject_name"]),
+        )
+    )
+    selected_match = ranked_matches[0]
+
+    return {
+        "program_code": result["program_code"],
+        "group": result["group"],
+        "academic_year": result["academic_year"],
+        "used_gpt": result["used_gpt"],
+        "subject_query": subject_name,
+        "gradebook": selected_match,
+        "candidates_found": len(ranked_matches),
     }
 
 
