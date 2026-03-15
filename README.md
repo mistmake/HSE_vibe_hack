@@ -129,6 +129,29 @@ python3 analyze_sheet.py \
   --view extraction
 ```
 
+## Telegram bot scaffold
+
+The repository now also contains a local-first Telegram bot scaffold in `app/bot`.
+
+Current shape:
+- `aiogram` bot handlers and keyboards
+- local `SQLite` storage for profiles and sources
+- service layer that calls `study_analysis.AnalysisPipeline`
+- a future backend seam in `app/bot/services/backend_api.py`
+
+Run flow:
+
+```bash
+python3 -m pip install -r requirements.txt
+export TELEGRAM_BOT_TOKEN=your_real_token_here
+python3 -m app.bot.main
+```
+
+The bot currently assumes:
+- one Telegram user = one student profile
+- one source = one Google Sheets document for one subject
+- only public Google Sheets links are accepted in the MVP
+
 ## Notes
 
 - `Google Sheets` support currently assumes the sheet is publicly readable.
